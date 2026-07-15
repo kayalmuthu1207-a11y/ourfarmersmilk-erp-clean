@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useLocation, useSearchParams } from "wouter";
 import { Milk, AlertCircle, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -17,10 +17,15 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (status === "authenticated") {
-    const redirect = searchParams.get("redirect") || "/";
-    navigate(redirect, { replace: true });
-  }
+  // Redirect on mount/status-change only — calling navigate() directly in the
+  // render body (as this used to) fires on every re-render and can produce a
+  // login <-> destination bounce loop instead of a clean one-time redirect.
+  useEffect(() => {
+    if (status === "authenticated") {
+      const redirect = searchParams.get("redirect") || "/";
+      navigate(redirect, { replace: true });
+    }
+  }, [status]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

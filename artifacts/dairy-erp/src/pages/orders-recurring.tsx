@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Pause, Play, Edit2, Trash2, RefreshCw } from "lucide-react";
+import { Plus, Pause, Play, Edit2, Trash2, Info } from "lucide-react";
 import { customers, products } from "@/data/mock";
 
 const recurring = [
@@ -39,16 +39,23 @@ export default function RecurringOrders() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Recurring Orders</h1>
-          <p className="text-muted-foreground text-sm mt-1">Standing daily orders auto-generated at 12:00 AM each day</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">Recurring Orders</h1>
+            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Preview</Badge>
+          </div>
+          <p className="text-muted-foreground text-sm mt-1">Standing daily order templates for repeat customers</p>
         </div>
         <Button data-testid="btn-add-recurring" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-2" />Add Recurring Order</Button>
       </div>
 
-      <Card className="border-amber-200 bg-amber-50/60">
+      <Card className="border-blue-200 bg-blue-50/60">
         <CardContent className="p-4 flex items-start gap-3">
-          <RefreshCw className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-          <p className="text-sm text-amber-800">Recurring orders auto-generate as order entries each day at 12:00 AM. Customers can still override quantities via the portal before the 8:00 PM cutoff.</p>
+          <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-blue-800">
+            This page is a preview of the intended recurring-order workflow. There's no recurring-order table or
+            automated daily generation in the schema yet — orders currently have to be entered manually each day via
+            Order Entry. Nothing here is persisted or auto-generated.
+          </p>
         </CardContent>
       </Card>
 

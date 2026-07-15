@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Milk, AlertTriangle } from "lucide-react";
-import { products } from "@/data/mock";
+import { Save, Milk, AlertTriangle, Info } from "lucide-react";
+import { useTodayCollection } from "@/hooks/useTodayCollection";
+import { useToast } from "@/hooks/use-toast";
 
 const planData = [
   { product: "Pasteurized Milk 500ml pouch", orderedTomorrow: 2800, currentStock: 1200, suggestedProd: 2000, inputMilk: 1400, planned: 2000 },
@@ -24,17 +25,36 @@ const planData = [
 
 export default function ProductionPlanning() {
   const [rows, setRows] = useState(planData);
+  const { data: todayCollection } = useTodayCollection();
+  const { toast } = useToast();
   const totalInput = rows.reduce((s, r) => s + r.inputMilk, 0);
-  const available = 9847;
+  const available = todayCollection ?? 0;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Production Planning</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">Production Planning</h1>
+            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Planning Tool</Badge>
+          </div>
           <p className="text-muted-foreground text-sm mt-1">Plan tomorrow's production based on pending orders and current stock</p>
         </div>
-        <Button data-testid="btn-save-plan"><Save className="h-4 w-4 mr-2" />Save Plan</Button>
+        <Button
+          data-testid="btn-save-plan"
+          onClick={() => toast({ title: "Plan noted", description: "This planning grid isn't persisted yet — there's no production plan table. Use it as a what-if worksheet." })}
+        >
+          <Save className="h-4 w-4 mr-2" />Save Plan
+        </Button>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5">
+        <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-blue-900">
+          This is a working "what-if" planning worksheet, not a persisted plan — there's no production plan table in the
+          schema yet. "Milk Available" reflects today's real collected quantity; the per-product plan rows are
+          illustrative and reset on refresh.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
