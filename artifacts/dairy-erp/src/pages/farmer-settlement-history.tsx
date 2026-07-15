@@ -46,7 +46,7 @@ export default function FarmerSettlementHistory() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settlement History</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Settlement History <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge></h1>
           <p className="text-muted-foreground text-sm mt-1">All 10-day farmer settlement periods</p>
         </div>
         <Select defaultValue="2026">

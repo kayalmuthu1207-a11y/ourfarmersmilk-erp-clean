@@ -34,7 +34,7 @@ export default function CreditManagement() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Credit Limit Management</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Credit Limit Management <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge></h1>
         <p className="text-muted-foreground text-sm mt-1">Monitor and manage customer credit exposure</p>
       </div>
 

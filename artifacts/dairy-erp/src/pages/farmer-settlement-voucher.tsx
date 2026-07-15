@@ -46,7 +46,7 @@ export default function SettlementVoucher() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settlement Voucher Preview</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Settlement Voucher Preview <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge></h1>
           <p className="text-muted-foreground text-sm mt-1">Print-ready farmer settlement document</p>
         </div>
         <div className="flex gap-2 flex-wrap">

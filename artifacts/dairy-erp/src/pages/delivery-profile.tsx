@@ -19,6 +19,10 @@ const profile = {
 export default function DeliveryProfile() {
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Preview</Badge>
+        <p className="text-xs text-muted-foreground">Illustrative profile — no delivery-partner table exists yet</p>
+      </div>
       <div className="bg-card rounded-xl border p-5 flex items-start gap-4">
         <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xl shrink-0">
           {profile.name.split(" ").map((n) => n[0]).join("")}

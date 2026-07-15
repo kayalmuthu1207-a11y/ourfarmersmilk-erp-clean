@@ -43,7 +43,7 @@ export default function SettlementTenDay() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">10-Day Settlement</h1>
+          <h1 className="text-2xl font-bold tracking-tight">10-Day Settlement <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge></h1>
           <p className="text-muted-foreground text-sm mt-1">{period.from} — {period.to} | {period.num}</p>
         </div>
         <div className="flex gap-2">

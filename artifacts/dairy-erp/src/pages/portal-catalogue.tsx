@@ -32,14 +32,14 @@ export default function PortalCatalogue() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Product Catalogue</h1>
-        <p className="text-muted-foreground text-sm mt-1">Products available for Prestige Towers Apartments</p>
+        <h1 className="text-2xl font-bold tracking-tight">Product Catalogue <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge></h1>
+        <p className="text-muted-foreground text-sm mt-1">Illustrative catalogue view — not yet wired to the logged-in customer's real contracted pricing</p>
       </div>
 
-      <Card className="border-primary/30 bg-primary/5">
+      <Card className="border-blue-200 bg-blue-50/60">
         <CardContent className="p-4 flex items-start gap-3">
-          <Info className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-          <p className="text-sm text-primary">Your pricing is customized for your account. Prices shown below reflect your contracted rates, which may differ from standard rates.</p>
+          <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-blue-800">Preview only — prices shown are illustrative, not your actual contracted rates.</p>
         </CardContent>
       </Card>
 

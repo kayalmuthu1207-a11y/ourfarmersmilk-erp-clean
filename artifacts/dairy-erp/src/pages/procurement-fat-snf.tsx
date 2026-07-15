@@ -34,7 +34,7 @@ export default function FatSnfHistory() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">FAT / SNF History</h1>
+          <h1 className="text-2xl font-bold tracking-tight">FAT / SNF History <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge></h1>
           <p className="text-muted-foreground text-sm mt-1">Milk quality tracking by farmer, village, and date</p>
         </div>
         <Button variant="outline" data-testid="btn-export"><Download className="h-4 w-4 mr-2" />Export</Button>

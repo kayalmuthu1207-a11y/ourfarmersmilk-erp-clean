@@ -125,8 +125,11 @@ export default function DeliveryPartner() {
       <div className="bg-card rounded-xl border p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Today's Route</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wider">
+              Today's Route <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge>
+            </p>
             <p className="text-lg font-bold mt-0.5">R-01 Tambaram Zone</p>
+            <p className="text-xs text-muted-foreground mt-1">Illustrative only — there's no route-assignment or driver schema yet</p>
           </div>
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Started</p>

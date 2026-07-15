@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { customers } from "@/data/mock";
 import { ShoppingCart, FileText, DollarSign, Edit, CheckCircle, Upload } from "lucide-react";
@@ -19,7 +20,7 @@ export default function CustomerActivity() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Activity Timeline</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Activity Timeline <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 align-middle ml-1">Preview</Badge></h1>
         <p className="text-muted-foreground">Complete audit trail of customer interactions.</p>
       </div>
 

@@ -23,7 +23,11 @@ export default function CustomerDocuments() {
   const [open, setOpen] = useState(false);
 
   const handleUpload = () => {
-    toast({ title: "Document Uploaded", description: "The document has been successfully uploaded and saved." });
+    toast({
+      title: "Not saved",
+      description: "There's no document storage table yet, so this can't actually be uploaded — this dialog is a preview of the intended workflow.",
+      variant: "destructive",
+    });
     setOpen(false);
   };
 
@@ -31,7 +35,10 @@ export default function CustomerDocuments() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Customer Documents</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Customer Documents</h1>
+            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Preview</Badge>
+          </div>
           <p className="text-muted-foreground">Manage contracts, certificates and proofs.</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
@@ -80,6 +87,13 @@ export default function CustomerDocuments() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <Card className="border-blue-200 bg-blue-50/60">
+        <CardContent className="p-4 text-sm text-blue-800">
+          Illustrative preview only — the rows below aren't real records and downloads won't work; there's no
+          document storage table or file bucket wired up yet.
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
