@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, Truck, Package, Users, Settings,
   Bell, Search, UserCircle, LogOut, ChevronDown,
-  FileText, Activity, Milk, ShoppingCart, DollarSign, Database, Shield, Banknote
+  FileText, Activity, Milk, ShoppingCart, DollarSign, Database, Shield, Banknote, Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -174,6 +174,8 @@ const allNavGroups = [
       { title: "Audit Logs", url: "/admin/audit-logs", icon: Activity },
       { title: "Login Audit", url: "/admin/login-audit", icon: Shield },
       { title: "Settings", url: "/admin/settings", icon: Settings },
+      { title: "Project Information", url: "/admin/project-info", icon: Info },
+      { title: "Demo Notes", url: "/admin/demo-notes", icon: FileText },
     ]
   }
 ];

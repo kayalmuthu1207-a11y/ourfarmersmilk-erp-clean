@@ -83,6 +83,8 @@ import AdminRoles from "@/pages/admin-roles";
 import AdminAuditLogs from "@/pages/admin-audit-logs";
 import AdminLoginAudit from "@/pages/admin-login-audit";
 import AdminSystemConfig from "@/pages/admin-system-config";
+import AdminProjectInfo from "@/pages/admin-project-info";
+import AdminDemoNotes from "@/pages/admin-demo-notes";
 import AdminProducts from "@/pages/admin-products";
 
 import PortalDashboard from "@/pages/portal-dashboard";
@@ -209,6 +211,8 @@ function Router() {
       <Route path="/admin/audit-logs"><ERP><AdminAuditLogs /></ERP></Route>
       <Route path="/admin/login-audit"><ERP><AdminLoginAudit /></ERP></Route>
       <Route path="/admin/settings"><ERP><AdminSystemConfig /></ERP></Route>
+      <Route path="/admin/project-info"><ERP><AdminProjectInfo /></ERP></Route>
+      <Route path="/admin/demo-notes"><ERP><AdminDemoNotes /></ERP></Route>
 
       <Route path="/portal"><Portal><PortalDashboard /></Portal></Route>
       <Route path="/portal/milk-orders"><Portal><PortalMilkOrders /></Portal></Route>
