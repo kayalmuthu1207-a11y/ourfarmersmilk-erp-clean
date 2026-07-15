@@ -41,11 +41,22 @@ export default function CreditNotes() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Credit Notes</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">Credit Notes</h1>
+            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Preview</Badge>
+          </div>
           <p className="text-muted-foreground text-sm mt-1">Issued adjustments and deductions against customer invoices</p>
         </div>
         <Button onClick={() => setOpen(true)} data-testid="btn-create-cn"><Plus className="h-4 w-4 mr-2" />Create Credit Note</Button>
       </div>
+
+      <Card className="border-blue-200 bg-blue-50/60">
+        <CardContent className="p-4 text-sm text-blue-800">
+          Illustrative preview only — there's no dedicated credit-note table in the schema yet. Real shortage/leakage
+          credits are currently handled through the <span className="font-medium">Shortage &amp; Leakage</span> workflow
+          (delivery adjustments), which does flow into each customer's actual outstanding balance.
+        </CardContent>
+      </Card>
 
       <Card className="border-primary/30 bg-primary/5">
         <CardContent className="p-4 flex items-center justify-between">

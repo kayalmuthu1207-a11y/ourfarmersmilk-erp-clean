@@ -44,11 +44,21 @@ export default function DeliveryPartners() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Delivery Partners</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">Delivery Partners</h1>
+            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Preview</Badge>
+          </div>
           <p className="text-muted-foreground text-sm mt-1">Driver and delivery partner management</p>
         </div>
         <Button onClick={() => setOpen(true)} data-testid="btn-add-partner"><Plus className="h-4 w-4 mr-2" />Add Partner</Button>
       </div>
+
+      <Card className="border-blue-200 bg-blue-50/60">
+        <CardContent className="p-4 text-sm text-blue-800">
+          Illustrative preview only — there's no delivery-partner or vehicle table in the schema yet, so nothing here
+          is persisted or linked to real dispatch/route data.
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-3 gap-4">
         {[
