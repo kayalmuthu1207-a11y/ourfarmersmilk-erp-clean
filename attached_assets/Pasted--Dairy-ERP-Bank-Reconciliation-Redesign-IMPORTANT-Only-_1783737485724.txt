@@ -1,0 +1,156 @@
+# Dairy ERP - Bank Reconciliation (Redesign)
+
+IMPORTANT:
+
+* Only touch payments-reconciliation.tsx
+* Every RPC parameter uses a `p_` prefix — use exact names
+* Do NOT build real CSV file parsing — bank transactions are entered as a
+  manual multi-row form for now, same scoping decision already made for
+  Vertex import. Leave a TODO noting a real file upload can replace this later.
+* Reconciliation does NOT push anything new to Tally — that already happened
+  when the payment was originally recorded. This screen only confirms the
+  bank statement matches what's already in the ERP, and surfaces anything
+  that doesn't.
+
+---
+
+## PART 1 — New hooks
+
+### src/hooks/useBankStatementUploads.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface BankTransaction {
+  transaction_id: number;
+  transaction_date: string;
+  amount: number;
+  description: string | null;
+}
+
+export interface BankStatementUpload {
+  upload_id: number;
+  storage_path: string;
+  created_at: string;
+  bank_transaction: BankTransaction[];
+}
+
+export function useBankStatementUploads() {
+  return useQuery({
+    queryKey: ["bank-statement-uploads"],
+    queryFn: async (): Promise<BankStatementUpload[]> => {
+      const { data, error } = await supabase
+        .from("bank_statement_upload")
+        .select("upload_id, storage_path, created_at, bank_transaction(transaction_id, transaction_date, amount, description)")
+        .order("upload_id", { ascending: false })
+        .limit(10);
+      if (error) throw new Error(error.message);
+      return data as unknown as BankStatementUpload[];
+    },
+  });
+}
+```
+
+### src/hooks/usePaymentMatches.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface PaymentMatch {
+  match_id: number;
+  match_status: "PROPOSED" | "CONFIRMED" | "REJECTED";
+  bank_transaction: {
+    transaction_date: string;
+    amount: number;
+    description: string | null;
+  } | null;
+  customer_payment: {
+    payment_amount: number;
+    payment_date: string;
+    customer_master: { customer_name: string } | null;
+  } | null;
+}
+
+export function usePaymentMatches() {
+  return useQuery({
+    queryKey: ["payment-matches"],
+    queryFn: async (): Promise<PaymentMatch[]> => {
+      const { data, error } = await supabase
+        .from("payment_match_log")
+        .select(
+          "match_id, match_status, bank_transaction(transaction_date, amount, description), customer_payment(payment_amount, payment_date, customer_master(customer_name))",
+        )
+        .order("match_id", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as unknown as PaymentMatch[];
+    },
+  });
+}
+```
+If the double-nested embed errors, fall back to separate flat queries joined
+client-side — same fallback approach used throughout this project.
+
+---
+
+## PART 2 — Rebuild payments-reconciliation.tsx
+
+Remove the entire fake `recon` array — the old model (comparing a customer's
+statement balance to their ERP balance) doesn't match how real reconciliation
+works here at all. Use `useBankStatementUploads()` and `usePaymentMatches()`.
+
+New structure, top to bottom:
+
+**1. "Upload Bank Statement" section** — a small repeatable-row form (date,
+amount, description — Add Row / Remove Row, same pattern as any other
+multi-line entry form in this project) plus a Storage Path text input
+(placeholder: "e.g. bank-statements/2026-07-10.csv" — this is just a label
+for now, not an actual file upload). Submit:
+```ts
+const { data, error } = await supabase.rpc("upload_bank_statement", {
+  p_storage_path: storagePath,
+  p_transactions: rows.map((r) => ({
+    transaction_date: r.date,
+    amount: Number(r.amount),
+    description: r.description || null,
+  })),
+});
+```
+On success, immediately call `propose_payment_matches` with the returned
+upload_id:
+```ts
+await supabase.rpc("propose_payment_matches", {
+  p_upload_id: data[0].upload_id,
+});
+```
+Invalidate `["bank-statement-uploads"]` and `["payment-matches"]` after both
+complete.
+
+**2. "Pending Matches" table** — every `usePaymentMatches()` row where
+`match_status === "PROPOSED"`. Columns: Bank Transaction (date, amount,
+description), Matched Payment (customer name, amount, date), Actions
+(Confirm / Reject buttons). Wire:
+```ts
+const { error } = await supabase.rpc("confirm_payment_match", {
+  p_match_id: match.match_id,
+  p_confirmed: true, // or false for Reject
+});
+```
+Invalidate `["payment-matches"]` on success.
+
+**3. "Unmatched Transactions" table** — for the most recent upload, any
+`bank_transaction` row whose `transaction_id` doesn't appear in any
+`payment_match_log` row at all (not proposed, confirmed, or rejected).
+Compute this client-side by comparing the two hooks' data. Show these
+clearly flagged — e.g. a note: "No matching payment found in the ERP for
+this transaction. This may be a payment that wasn't recorded yet, or an
+unrelated transaction (e.g. a salary payment, a bank charge)."
+
+Remove the old stat cards (Total Banked, Fully Matched, Variance Alerts) —
+replace with real ones: Pending Matches count, Unmatched Transactions count.
+
+## Deliverable
+
+A working reconciliation flow matching what actually happens: enter a day's
+transactions, get auto-proposed matches, confirm or reject each one, and see
+clearly flagged whatever doesn't match anything — without implying
+reconciliation itself pushes anything to Tally, since it doesn't.

@@ -1,0 +1,185 @@
+# Replit Agent Prompt — Billing & Payments Batch
+
+Paste everything below into Replit Agent as one prompt. This covers 5 pages. Do NOT
+touch billing-credit-notes.tsx or billing-shortage-adjustments.tsx — those are still
+being confirmed against the schema and are intentionally left as mock for now.
+
+All 5 pages below are read-only reporting/browsing views — no create/edit mutations,
+since none of the underlying data is meant to be entered from these screens (invoices
+and payments are generated/recorded elsewhere in the system already).
+
+---
+
+## Step 1 — Create `src/hooks/useDailySalesInvoices.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DailySalesInvoice {
+  invoice_id: number;
+  dispatch_id: number;
+  customer_id: number;
+  statement_line_id: number | null;
+  invoice_amount: number;
+  invoice_date: string;
+  created_at: string;
+  customer_master: { customer_name: string } | null;
+}
+
+export function useDailySalesInvoices() {
+  return useQuery({
+    queryKey: ["daily-sales-invoices"],
+    queryFn: async (): Promise<DailySalesInvoice[]> => {
+      const { data, error } = await supabase
+        .from("daily_sales_invoice")
+        .select(
+          "invoice_id, dispatch_id, customer_id, statement_line_id, invoice_amount, invoice_date, created_at, customer_master(customer_name)",
+        )
+        .order("invoice_date", { ascending: false })
+        .order("invoice_id", { ascending: false })
+        .limit(300);
+      if (error) throw new Error(error.message);
+      return data as unknown as DailySalesInvoice[];
+    },
+  });
+}
+```
+
+## Step 2 — Replace `src/pages/billing-invoices.tsx`
+
+Build a page using `useDailySalesInvoices()`: a table with columns Invoice Date, Customer,
+Dispatch ID, Statement Line ID (show "—" if null, meaning not yet folded into a cycle
+statement), Amount. Add a search input filtering by customer name, and a note near the
+top: "Daily invoices are generated automatically at dispatch time — this is a browsing
+view, not an entry form." Loading/error states matching `customer-statements.tsx`.
+
+## Step 3 — Replace `src/pages/billing-outstanding.tsx`
+
+Build a page using the EXISTING `useCustomers()` and `useCustomerOutstandingBalances()`
+hooks (both already exist — do not recreate them). Join them client-side: for each
+customer with `outstanding_balance > 0`, show a table row with customer name, billing
+mode, and outstanding balance, sorted descending by balance. Add a search input.
+
+## Step 4 — Replace `src/pages/billing-outstanding-dashboard.tsx`
+
+Build a page using the same two existing hooks (`useCustomers()`,
+`useCustomerOutstandingBalances()`). Show three summary cards: Total Outstanding
+(sum across all customers with balance > 0), Customers With Balance (count), Average
+Balance. Below that, a table of the top 10 customers by outstanding balance descending.
+
+## Step 5 — Create `src/hooks/useBillingAging.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface AgingCustomer {
+  customer_id: number;
+  customer_name: string;
+  billing_mode: "CYCLE" | "PAY_ON_DELIVERY" | "DAILY";
+  outstanding_balance: number;
+  last_cycle_end_date: string | null;
+  days_since_cycle_end: number | null;
+}
+
+export function useBillingAging() {
+  return useQuery({
+    queryKey: ["billing-aging"],
+    queryFn: async (): Promise<AgingCustomer[]> => {
+      const { data: customers, error: custError } = await supabase
+        .from("customer_master")
+        .select("customer_id, customer_name, billing_mode, last_cycle_end_date");
+      if (custError) throw new Error(custError.message);
+
+      const { data: balances, error: balError } = await supabase
+        .from("customer_outstanding_balance")
+        .select("customer_id, outstanding_balance");
+      if (balError) throw new Error(balError.message);
+
+      const balanceMap = new Map(balances.map((b) => [b.customer_id, Number(b.outstanding_balance)]));
+      const today = new Date();
+
+      return customers
+        .map((c) => {
+          const balance = balanceMap.get(c.customer_id) ?? 0;
+          const daysSince = c.last_cycle_end_date
+            ? Math.floor((today.getTime() - new Date(c.last_cycle_end_date).getTime()) / 86400000)
+            : null;
+          return {
+            customer_id: c.customer_id,
+            customer_name: c.customer_name,
+            billing_mode: c.billing_mode,
+            outstanding_balance: balance,
+            last_cycle_end_date: c.last_cycle_end_date,
+            days_since_cycle_end: daysSince,
+          };
+        })
+        .filter((c) => c.outstanding_balance > 0);
+    },
+  });
+}
+```
+
+## Step 6 — Replace `src/pages/billing-aging.tsx`
+
+Build a page using `useBillingAging()`. Bucket each row by `days_since_cycle_end`:
+`0–30`, `31–60`, `61–90`, `90+`, and a separate `Not Cycle-Billed` bucket for rows where
+`days_since_cycle_end` is null (this covers PAY_ON_DELIVERY/DAILY customers who don't
+have a cycle statement — do not invent aging logic for them, just group them
+separately and label it clearly). Show one summary card per bucket with the bucket's
+total outstanding amount, then a full table below with a bucket badge per row. Add a
+short note: "Aging is based on days since each customer's last billing cycle closed.
+Non-cycle customers are shown separately since they don't have a cycle date to age
+against."
+
+## Step 7 — Create `src/hooks/useCustomerPaymentsHistory.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface CustomerPaymentRecord {
+  payment_id: number;
+  statement_id: number | null;
+  payment_amount: number;
+  payment_date: string;
+  payment_method: string | null;
+  customer_id: number;
+  customer_master: { customer_name: string } | null;
+}
+
+export function useCustomerPaymentsHistory() {
+  return useQuery({
+    queryKey: ["customer-payments-history"],
+    queryFn: async (): Promise<CustomerPaymentRecord[]> => {
+      const { data, error } = await supabase
+        .from("customer_payment")
+        .select(
+          "payment_id, statement_id, payment_amount, payment_date, payment_method, customer_id, customer_master(customer_name)",
+        )
+        .order("payment_date", { ascending: false })
+        .order("payment_id", { ascending: false })
+        .limit(300);
+      if (error) throw new Error(error.message);
+      return data as unknown as CustomerPaymentRecord[];
+    },
+  });
+}
+```
+
+## Step 8 — Replace `src/pages/payments-history.tsx`
+
+Build a page using `useCustomerPaymentsHistory()`: a table with Payment Date, Customer,
+Amount, Method, Statement ID (show "—" if null). Add a search input (customer name) and
+a payment-method filter dropdown (derive the distinct method values from the loaded
+data, don't hardcode a list).
+
+---
+
+## Before marking this complete
+
+Run the project's typecheck command and paste the actual output. Then run
+`grep -rn "billing-credit-notes\|billing-shortage-adjustments" src/pages/` to confirm
+those two files were not touched. Report both results directly — don't summarize from
+memory.

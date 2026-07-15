@@ -1,0 +1,148 @@
+# Replit Agent Prompt — Admin Batch
+
+Paste everything below into Replit Agent as one prompt. Do NOT touch
+admin-login-audit.tsx or admin-system-config.tsx — both confirmed against the
+live schema to have no backing table. Leave them as mock.
+
+Note: two of these three pages are meaningfully simpler than what their mocks
+currently assume — build the honest, simpler real version, don't invent fields.
+
+---
+
+## Step 1 — Create `src/hooks/useAuditLogs.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface AuditLogEntry {
+  audit_id: number;
+  table_name: string;
+  record_id: number;
+  changed_by: number | null;
+  change_summary: string | null;
+  changed_at: string;
+  users: { full_name: string } | null;
+}
+
+export function useAuditLogs() {
+  return useQuery({
+    queryKey: ["audit-logs"],
+    queryFn: async (): Promise<AuditLogEntry[]> => {
+      const { data, error } = await supabase
+        .from("audit_log")
+        .select("audit_id, table_name, record_id, changed_by, change_summary, changed_at, users(full_name)")
+        .order("changed_at", { ascending: false })
+        .limit(300);
+      if (error) throw new Error(error.message);
+      return data as unknown as AuditLogEntry[];
+    },
+  });
+}
+```
+
+## Step 2 — Replace `src/pages/admin-audit-logs.tsx`
+
+Build a read-only page: table with Changed At, Table Name, Record ID, Changed By
+(user's full name, or "System" if `changed_by` is null), Change Summary. Add a
+search input filtering by table name, and a table-name filter dropdown built
+from distinct values present in the loaded data.
+
+## Step 3 — Create `src/hooks/useRolePermissions.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface RoleWithPermissions {
+  role_id: number;
+  role_code: string;
+  role_name: string;
+  permissions: string[];
+}
+
+export function useRolePermissions() {
+  return useQuery({
+    queryKey: ["role-permissions"],
+    queryFn: async (): Promise<RoleWithPermissions[]> => {
+      const { data: roles, error: rolesError } = await supabase
+        .from("roles")
+        .select("role_id, role_code, role_name")
+        .order("role_id");
+      if (rolesError) throw new Error(rolesError.message);
+
+      const { data: perms, error: permsError } = await supabase
+        .from("role_permissions")
+        .select("role_id, permission_code");
+      if (permsError) throw new Error(permsError.message);
+
+      return roles.map((r) => ({
+        ...r,
+        permissions: perms.filter((p) => p.role_id === r.role_id).map((p) => p.permission_code),
+      }));
+    },
+  });
+}
+```
+
+## Step 4 — Replace `src/pages/admin-roles.tsx`
+
+Important: the real schema has a flat list of permission codes per role
+(`role_permissions.permission_code`), not a Module × Action matrix. Build a
+simpler, honest page: a card per role (role_name + role_code badge), listing
+its granted permission codes as badges/chips underneath. Remove the
+Module/Permission matrix and the invented "View/Create/Edit/Delete/Approve"
+grid from the mock — that structure doesn't exist in this schema. This is a
+read-only view for now (editing role permissions is a separate, more
+consequential feature — don't add write capability here without being asked).
+
+## Step 5 — Create `src/hooks/useStaffUsers.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface StaffUser {
+  user_id: number;
+  role_id: number;
+  full_name: string;
+  phone_number: string;
+  status: "ACTIVE" | "INACTIVE";
+  last_login_at: string | null;
+  roles: { role_name: string } | null;
+}
+
+export function useStaffUsers() {
+  return useQuery({
+    queryKey: ["staff-users"],
+    queryFn: async (): Promise<StaffUser[]> => {
+      const { data, error } = await supabase
+        .from("users")
+        .select("user_id, role_id, full_name, phone_number, status, last_login_at, roles(role_name)")
+        .order("full_name");
+      if (error) throw new Error(error.message);
+      return data as unknown as StaffUser[];
+    },
+  });
+}
+```
+
+## Step 6 — Replace `src/pages/admin-users.tsx`
+
+Build a page using `useStaffUsers()`: summary cards for **Total Users** and
+**Active** (count where `status === "ACTIVE"`) — drop the "2FA Enabled" stat
+from the mock, there's no such field in this schema. Table: Full Name, Phone
+Number, Role (`roles.role_name`), Status badge, Last Login (`last_login_at`,
+show "Never" if null). Add a search input by name. This is read-only for now —
+don't add role-editing or status-toggle mutations without being asked, since
+changing someone's role/status is a more consequential action worth a
+deliberate follow-up rather than bundling into this pass.
+
+---
+
+## Before marking this complete
+
+Run the project's typecheck command and paste the actual output. Then run
+`grep -rn "admin-login-audit\|admin-system-config" src/pages/` to confirm those
+two files were not touched. Report both results directly — don't summarize
+from memory.

@@ -1,0 +1,165 @@
+# Replit Agent Prompt — Main Dashboard
+
+Paste everything below into Replit Agent as one prompt.
+
+The Tally Sync card cannot be built yet — Tally integration is a deliberately
+separate, not-yet-started segment of work. Replace that one card with a
+simple "Not yet connected" placeholder rather than querying anything for it.
+
+Reuse existing hooks wherever listed below — do not recreate
+`useInventoryBalances`, `useProducts`, `useOrderHistory`,
+`useCustomerOutstandingBalances`, `useCustomerPaymentsHistory`,
+`useDispatchReports`, `useVapQueue`, or `useAllDeliveryLocations`.
+
+---
+
+## Step 1 — Create `src/hooks/useTodayCollection.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export function useTodayCollection() {
+  return useQuery({
+    queryKey: ["today-collection"],
+    queryFn: async (): Promise<number> => {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from("milk_collection_record")
+        .select("quantity")
+        .eq("collection_date", today);
+      if (error) throw new Error(error.message);
+      return data.reduce((s, r: any) => s + Number(r.quantity), 0);
+    },
+  });
+}
+```
+
+If the actual date column on `milk_collection_record` isn't named
+`collection_date` (check `useVillageCollectionSummary.ts` for the real column
+name it already uses), use that instead — don't guess, match the existing hook.
+
+## Step 2 — Create `src/hooks/useWeeklyCollectionTrend.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DailyCollectionPoint {
+  date: string;
+  quantity: number;
+}
+
+export function useWeeklyCollectionTrend() {
+  return useQuery({
+    queryKey: ["weekly-collection-trend"],
+    queryFn: async (): Promise<DailyCollectionPoint[]> => {
+      const start = new Date();
+      start.setDate(start.getDate() - 6);
+      const startDate = start.toISOString().slice(0, 10);
+
+      const { data, error } = await supabase
+        .from("milk_collection_record")
+        .select("collection_date, quantity")
+        .gte("collection_date", startDate);
+      if (error) throw new Error(error.message);
+
+      const byDate = new Map<string, number>();
+      data.forEach((r: any) => byDate.set(r.collection_date, (byDate.get(r.collection_date) ?? 0) + Number(r.quantity)));
+      return Array.from(byDate.entries()).map(([date, quantity]) => ({ date, quantity })).sort((a, b) => a.date.localeCompare(b.date));
+    },
+  });
+}
+```
+
+(Same column-name caveat as Step 1 — match whatever `useVillageCollectionSummary.ts` actually uses.)
+
+## Step 3 — Create `src/hooks/useTodayProductionBatches.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export function useTodayProductionBatches() {
+  return useQuery({
+    queryKey: ["today-production-batches"],
+    queryFn: async (): Promise<number> => {
+      const today = new Date().toISOString().slice(0, 10);
+      const { count, error } = await supabase
+        .from("production_batch")
+        .select("*", { count: "exact", head: true })
+        .eq("production_date", today);
+      if (error) throw new Error(error.message);
+      return count ?? 0;
+    },
+  });
+}
+```
+
+## Step 4 — Create `src/hooks/useDashboardAlerts.ts`
+
+This defines "alerts" as a concrete, real count of things needing staff
+attention — not invented figures. Assumption to flag to the user: this treats
+pending VAP confirmations, pending delivery-location approvals, and rejected
+delivery adjustments as the alert set. If a different definition is wanted
+later, this is the one function to change.
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DashboardAlert {
+  label: string;
+  count: number;
+}
+
+export function useDashboardAlerts() {
+  return useQuery({
+    queryKey: ["dashboard-alerts"],
+    queryFn: async (): Promise<DashboardAlert[]> => {
+      const [vap, locations, adjustments] = await Promise.all([
+        supabase.from("customer_order_line").select("*", { count: "exact", head: true }).eq("vap_confirmation_status", "PENDING_CONFIRMATION"),
+        supabase.from("delivery_location").select("*", { count: "exact", head: true }).eq("status", "PENDING_APPROVAL"),
+        supabase.from("delivery_adjustment").select("*", { count: "exact", head: true }).eq("approval_status", "PROPOSED"),
+      ]);
+      if (vap.error) throw new Error(vap.error.message);
+      if (locations.error) throw new Error(locations.error.message);
+      if (adjustments.error) throw new Error(adjustments.error.message);
+
+      return [
+        { label: "VAP confirmations pending", count: vap.count ?? 0 },
+        { label: "Delivery locations awaiting approval", count: locations.count ?? 0 },
+        { label: "Delivery adjustments awaiting approval", count: adjustments.count ?? 0 },
+      ].filter((a) => a.count > 0);
+    },
+  });
+}
+```
+
+Note: `delivery_adjustment.approval_status` value here is a guess
+(`"PROPOSED"`) matching the pattern from `payment_match_log` — if it errors,
+check the actual value with a quick distinct-values query before hardcoding.
+
+## Step 5 — Replace `src/pages/dashboard.tsx`
+
+Build the dashboard with these cards/sections, each using the hook noted:
+
+- **Today's Collection** — `useTodayCollection()`, show total litres
+- **Production Batches** — `useTodayProductionBatches()`, count for today
+- **Active Orders** — reuse `useOrderHistory()`, filter to `order_date === today`, show count
+- **Outstanding AR** — reuse `useCustomerOutstandingBalances()`, sum all values
+- **Tally Sync** — static placeholder card: "Not connected yet — Tally integration is a separate, upcoming phase." No query.
+- **7-Day Collection Trend** — `useWeeklyCollectionTrend()`, render as a simple bar/line chart or table matching whatever charting approach the codebase already uses elsewhere (check if `recharts` or similar is already a dependency before adding a new charting library)
+- **Current Inventory** — reuse `useInventoryBalances()` + `useProducts()`, show top 8 by quantity
+- **Recent Activity** — combine the 5 most recent items each from `useOrderHistory()`, `useCustomerPaymentsHistory()`, and `useDispatchReports()`, merge and sort by their timestamp fields, show as one unified list (label each item with its type: "Order", "Payment", "Dispatch")
+- **System Alerts** — `useDashboardAlerts()`, render each returned alert as a row; if the array is empty, show "No alerts — all caught up"
+- **Quick Links** — static navigation shortcuts to other pages, no data needed, keep as-is from the mock if it's already just links
+
+---
+
+## Before marking this complete
+
+Run the project's typecheck command and paste the actual output. Also paste a
+screenshot or description of the rendered dashboard so we can confirm the
+numbers look sane (e.g. "Today's Collection" isn't showing 0 due to a wrong
+date-column name) before treating this as done.

@@ -1,0 +1,125 @@
+# Dairy ERP - Salary/Payroll Entry (Brand New Page)
+
+IMPORTANT:
+
+* This is a NEW page — nothing exists for this yet, no mock data to replace
+* Every RPC parameter uses a `p_` prefix — use exact names
+* This is Owner-only functionality (a new MANAGE_PAYROLL permission,
+  separate from other financial permissions, reflecting how sensitive salary
+  data is) — if the logged-in user isn't the Owner, the RPC will reject the
+  call with a clear permission error; surface that error plainly, don't
+  hide the page behind a client-side role check alone
+
+---
+
+## PART 1 — New hooks
+
+### src/hooks/useEmployees.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface Employee {
+  user_id: number;
+  full_name: string;
+  phone_number: string;
+  status: "ACTIVE" | "INACTIVE";
+}
+
+export function useEmployees() {
+  return useQuery({
+    queryKey: ["employees"],
+    queryFn: async (): Promise<Employee[]> => {
+      const { data, error } = await supabase
+        .from("users")
+        .select("user_id, full_name, phone_number, status")
+        .eq("status", "ACTIVE")
+        .order("full_name");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### src/hooks/useSalaryPayments.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface SalaryPayment {
+  payment_id: number;
+  user_id: number;
+  amount: number;
+  pay_period_month: number;
+  pay_period_year: number;
+  payment_date: string;
+  payment_method: string | null;
+  remarks: string | null;
+  users: { full_name: string } | null;
+}
+
+export function useSalaryPayments() {
+  return useQuery({
+    queryKey: ["salary-payments"],
+    queryFn: async (): Promise<SalaryPayment[]> => {
+      const { data, error } = await supabase
+        .from("salary_payment")
+        .select(
+          "payment_id, user_id, amount, pay_period_month, pay_period_year, payment_date, payment_method, remarks, users(full_name)",
+        )
+        .order("payment_id", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as unknown as SalaryPayment[];
+    },
+  });
+}
+```
+
+---
+
+## PART 2 — New page: src/pages/salary-payments.tsx
+
+Follow the visual/layout conventions already established in other admin
+pages in this project (Card-based stat row, Table below, Dialog for the
+add-form) — match the existing style, don't introduce a new one.
+
+Stat row: Total Paid This Month (sum of `amount` where `pay_period_month`/
+`pay_period_year` match the current month — compute client-side), Employees
+Paid This Month (distinct `user_id` count for the current period), Total
+Payments (all-time count).
+
+Table columns: Employee (from `users.full_name`), Period (format
+`pay_period_month`/`pay_period_year` as e.g. "July 2026"), Amount, Payment
+Date, Method, Remarks.
+
+"Record Salary Payment" button + dialog. Fields: Employee (select, from
+`useEmployees()`), Month (select 1-12), Year (number input, default current
+year), Amount (₹), Payment Date (date, default today), Payment Method
+(text, e.g. "Bank Transfer" / "Cash" / "UPI"), Remarks (optional text).
+
+Submit:
+```ts
+const { error } = await supabase.rpc("record_salary_payment", {
+  p_user_id: form.userId,
+  p_amount: Number(form.amount),
+  p_pay_period_month: Number(form.month),
+  p_pay_period_year: Number(form.year),
+  p_payment_date: form.paymentDate,
+  p_payment_method: form.method || null,
+  p_remarks: form.remarks || null,
+});
+```
+On error, show the real message plainly — two expected, meaningful
+rejections: "You do not have permission to record salary payments" (if
+logged in as anyone but the Owner) and "This employee has already been paid
+for M/YYYY" (the real duplicate-payment protection — this isn't a bug, it's
+the system correctly stopping a double payment). Invalidate
+`["salary-payments"]` on success.
+
+## Deliverable
+
+A working, Owner-only salary entry screen: pick an employee and a period,
+record a payment, see it queued for Tally (Payment Voucher, against that
+employee's own ledger once tally_ledger_map is populated for them — that
+mapping itself is a separate, later admin task, not part of this page).

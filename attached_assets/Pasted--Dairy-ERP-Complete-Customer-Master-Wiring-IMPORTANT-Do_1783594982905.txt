@@ -1,0 +1,154 @@
+# Dairy ERP - Complete Customer Master Wiring
+
+IMPORTANT:
+
+* Do NOT touch the login/auth system (src/lib/auth/*, src/pages/login.tsx) —
+  that's intentionally a temporary placeholder for now, leave it exactly as is
+* Do NOT touch any page other than customers-master.tsx
+* Every Supabase RPC in this project uses parameter names with a `p_` prefix
+  (e.g. `p_customer_id`, not `customer_id`) — this is deliberate, not a typo,
+  done to avoid ambiguous-column-reference bugs in the database functions.
+  Every `.rpc()` call in this file and all future ones MUST use the exact
+  parameter name including the `p_` prefix, or the call will fail silently
+  against the real database even though it looks correct in the browser.
+
+## 1. Fix the existing approve_customer call — wrong parameter name
+
+Find this in customers-master.tsx:
+```ts
+const { error } = await supabase.rpc("approve_customer", { customer_id: customerId });
+```
+Change it to:
+```ts
+const { error } = await supabase.rpc("approve_customer", { p_customer_id: customerId });
+```
+
+## 2. Wire real outstanding balance — replace the "N/A" placeholder
+
+Create src/hooks/useCustomerOutstandingBalances.ts:
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export function useCustomerOutstandingBalances() {
+  return useQuery({
+    queryKey: ["customer-outstanding-balances"],
+    queryFn: async (): Promise<Map<number, number>> => {
+      const { data, error } = await supabase
+        .from("customer_outstanding_balance")
+        .select("customer_id, outstanding_balance");
+
+      if (error) throw new Error(error.message);
+
+      return new Map(data.map((row) => [row.customer_id, Number(row.outstanding_balance)]));
+    },
+  });
+}
+```
+
+In customers-master.tsx: call this hook, use the returned Map to look up each
+customer's real balance instead of showing "N/A". If a customer_id isn't in
+the map, show ₹0 (no outstanding). Update the `withOutstanding` stat to count
+customers with a balance greater than 0, using this same real data — remove
+the TODO comment for this since it's now resolved.
+
+## 3. Wire real readiness checklist — replace the mock-data version
+
+Create src/hooks/useCustomerReadiness.ts:
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface ReadinessSets {
+  hasUser: Set<number>;
+  hasLocation: Set<number>;
+  hasProduct: Set<number>;
+  hasPrice: Set<number>;
+}
+
+export function useCustomerReadiness() {
+  return useQuery({
+    queryKey: ["customer-readiness"],
+    queryFn: async (): Promise<ReadinessSets> => {
+      const [users, locations, mappings, prices] = await Promise.all([
+        supabase.from("customer_user").select("customer_id").eq("status", "ACTIVE"),
+        supabase.from("delivery_location").select("customer_id").eq("status", "ACTIVE"),
+        supabase.from("customer_product_mapping").select("customer_id").eq("is_active", true),
+        supabase.from("customer_price_master").select("customer_id").is("effective_to", null),
+      ]);
+
+      for (const r of [users, locations, mappings, prices]) {
+        if (r.error) throw new Error(r.error.message);
+      }
+
+      return {
+        hasUser: new Set(users.data!.map((r) => r.customer_id)),
+        hasLocation: new Set(locations.data!.map((r) => r.customer_id)),
+        hasProduct: new Set(mappings.data!.map((r) => r.customer_id)),
+        hasPrice: new Set(prices.data!.map((r) => r.customer_id)),
+      };
+    },
+  });
+}
+```
+
+In customers-master.tsx: replace the `readinessChecklist(customerId: string)`
+function (which currently reads from mock data) with one that takes a
+`customer_id: number` and this hook's returned `ReadinessSets`, checking
+`.has(customerId)` on each set instead. Remove the `customerUsers,
+deliveryLocations, customerProductMapping, customerPricing` import from
+"@/data/mock" once nothing in this file still uses it. Remove the associated
+TODO comment since this is now resolved.
+
+## 4. Wire the Add Customer form to the real create_customer RPC
+
+Replace the `handleAdd` function's body (currently only appends to local
+state) with a real mutation:
+```ts
+const createMutation = useMutation({
+  mutationFn: async (values: typeof form) => {
+    const { error } = await supabase.rpc("create_customer", {
+      p_customer_name: values.name,
+      p_category: values.type.toUpperCase(),
+      p_billing_mode: "CYCLE",
+      p_billing_cycle_days: values.billingCycle === "10-day" ? 10 : 30,
+    });
+    if (error) throw new Error(error.message);
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ["customers"] });
+    setDialogOpen(false);
+    setForm(emptyForm);
+  },
+});
+
+const handleAdd = () => {
+  if (!form.name.trim()) return;
+  createMutation.mutate(form);
+};
+```
+Show a loading spinner on the "Add Customer" button while `createMutation.isPending`,
+and an error message if `createMutation.isError`, matching the pattern already
+used for `approveMutation` elsewhere in this file. Remove the associated TODO
+comment.
+
+Note: `p_billing_mode` is hardcoded to `"CYCLE"` here because this form has no
+field for choosing DAILY or PAY_ON_DELIVERY yet — that's a real gap, flagged
+here on purpose, not silently fixed. Leave a TODO noting the form needs a
+billing mode selector before PAY_ON_DELIVERY or DAILY customers can be created
+through this UI.
+
+## 5. Also remove the now-fully-unused "Credit Limit" field
+
+The dialog still has a "Credit Limit (₹)" input explicitly marked "Internal /
+Not in BRD — confirm with client". Since this isn't part of create_customer
+and was never confirmed, remove this field and its state entirely rather than
+leaving dead UI around an input that does nothing.
+
+## Deliverable
+
+Customer Master should be fully real: live customer list, live outstanding
+balances, live readiness checklist, working Approve action, working Add
+Customer action (CYCLE customers only, with a flagged limitation). No
+lib/auth files touched. The one new TODO (billing mode selector) is
+intentional and should remain.

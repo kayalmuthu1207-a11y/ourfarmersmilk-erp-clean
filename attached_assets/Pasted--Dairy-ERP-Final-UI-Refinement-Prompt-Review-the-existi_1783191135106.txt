@@ -1,0 +1,299 @@
+# Dairy ERP - Final UI Refinement Prompt
+
+Review the existing Dairy ERP UI prototype and business requirements.
+
+This is the FINAL UI REFINEMENT before Database Architecture (Phase 2B) begins.
+
+IMPORTANT:
+
+* UI ONLY
+* Do NOT implement backend
+* Do NOT implement database
+* Do NOT implement APIs
+* Do NOT implement Tally integration
+* Do NOT implement authentication logic
+
+Create only the complete stakeholder-review-ready UI.
+
+---
+
+## 1. Mobile-First Design
+
+The entire ERP must be fully responsive and optimized for:
+
+* Android Phones
+* Tablets
+* Desktop
+
+Primary users are expected to use mobile devices.
+
+Target Users:
+
+* Owners
+* Admins
+* Managers
+* Accountants
+* Delivery Managers
+* Delivery Partners
+* Customers
+
+All screens must provide a clean mobile experience with easy navigation and minimal clicks.
+
+---
+
+## 2. Customer Portal
+
+Customers must have access to:
+
+* Dashboard
+* Milk Orders
+* Value Added Product Orders
+* Order History
+* Invoice History
+* Payment History
+* Delivery Locations
+
+### Customer Structure
+
+One customer may have:
+
+* Multiple portal users
+* Multiple phone numbers
+* Multiple delivery locations
+
+Example:
+
+Customer:
+Tilaga Enterprises
+
+Locations:
+
+* Unity Enclave
+* Green Residency
+* Lake View Apartments
+
+The portal should clearly display delivery locations while keeping customer details available.
+
+---
+
+## 3. Milk Ordering Workflow
+
+Create a dedicated Milk Ordering module.
+
+Products may include:
+
+* Cow Milk
+* Standardized Milk
+* Homogenized Milk
+* Branded Milk
+* White Packet Milk
+* Future Milk Products
+
+Workflow:
+
+Customer Places Order
+→ Admin Review Queue
+→ Delivery Planning
+→ Dispatch
+
+Notes:
+
+* No approval or rejection workflow.
+* Admin review is only an operational verification checkpoint.
+* Orders are immediately visible to operations.
+* Customer does not wait for confirmation.
+
+---
+
+## 4. Value Added Product Workflow
+
+Create a separate Value Added Product Ordering module.
+
+Products may include:
+
+* Paneer
+* Ghee
+* Butter
+* Curd
+* Cream
+* Future Value Added Products
+
+Workflow:
+
+Customer Places Order
+→ Pending Confirmation
+→ Admin Reviews Availability
+→ Confirmed OR Not Available
+→ Production Planning
+→ Dispatch
+→ Billing
+
+Requirements:
+
+If confirmed:
+
+* Customer sees Confirmed status.
+
+If unavailable:
+
+* Customer sees Not Available status.
+
+This is a customer-facing confirmation workflow.
+
+---
+
+## 5. Administration Module
+
+Admin must have screens for:
+
+### Customer Management
+
+* Customer Master
+* Add Customer
+* Edit Customer
+* Activate / Deactivate Customer
+
+### Customer Users
+
+* Add User
+* Edit User
+* Disable User
+
+### Delivery Locations
+
+* Add Location
+* Edit Location
+* Activate / Deactivate Location
+
+### Product Management
+
+* Product Master
+* Add Product
+* Edit Product
+* Activate / Deactivate Product
+
+### Customer Pricing
+
+* Maintain customer-specific pricing
+* Edit customer rates
+* View pricing matrix
+
+### Security
+
+* Users
+* Roles
+* Permissions
+
+### Tally
+
+* Tally Integration Monitoring Screen
+
+---
+
+## 6. Manager Module
+
+Manager can access:
+
+* Planning
+* Batch Entry
+* Planning Tracking
+* Stock Dashboard
+* Adjustments
+* History
+
+Manager should not have access to:
+
+* Pricing Management
+* Product Master Management
+* User Management
+
+---
+
+## 7. Accountant Module
+
+Accountants can access:
+
+* Village Collection Verification
+* Local Purchase Entry
+* Collection Reports
+* Settlement Reports
+* Billing
+* Invoice Generation
+* Payments
+
+---
+
+## 8. Delivery Module
+
+### Delivery Manager
+
+Can access:
+
+* Dispatch Planning
+* Route Planning
+* Delivery Monitoring
+
+### Delivery Partner
+
+Can access:
+
+* Assigned Delivery Locations
+* Dispatch Tracking
+* Shortage Entry
+* Leakage Entry
+
+Must be mobile optimized.
+
+---
+
+## 9. Customer Pricing UI
+
+Support customer-specific pricing.
+
+Example:
+
+Customer A:
+
+* Cow Milk 500ml = ₹25.50
+
+Customer B:
+
+* Cow Milk 500ml = ₹26.00
+
+Admin can maintain pricing.
+
+Customers only see their own prices.
+
+---
+
+## 10. Preserve Existing ERP Modules
+
+Keep all existing modules and navigation structure.
+
+Do not remove:
+
+* Procurement
+* Village Collection
+* Local Purchase
+* Farmer Settlement
+* Production
+* Inventory
+* Orders
+* Dispatch
+* Billing
+* Payments
+* Reporting
+* Tally Integration
+* User Management
+
+Only refine workflows, permissions, and user experience.
+
+---
+
+## Deliverable
+
+Produce a final stakeholder-review-ready UI prototype.
+
+This UI will be frozen after review and used as the foundation for:
+
+Phase 2B - Database Architecture & Backend Design.

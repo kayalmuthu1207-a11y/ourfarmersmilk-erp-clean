@@ -1,0 +1,195 @@
+# Dairy ERP - Dispatch Planning & Post-Delivery Adjustments
+
+IMPORTANT:
+
+* Do NOT touch any page other than dispatch-planning.tsx and
+  dispatch-confirmation.tsx
+* Every RPC parameter uses a `p_` prefix — use exact names
+* "Leakage" must NOT appear as an option anywhere in dispatch-confirmation.tsx
+  — that reason code is customer-initiated only, through a completely
+  separate screen (not part of this prompt), and the backend will always
+  reject it if staff try to submit it here
+
+---
+
+## PART 1 — New hooks
+
+### src/hooks/useDispatchableOrders.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DispatchableOrderLine {
+  order_line_id: number;
+  product_id: number;
+  ordered_qty: number;
+  vap_confirmation_status: "PENDING_CONFIRMATION" | "CONFIRMED" | "NOT_AVAILABLE" | null;
+  product_master: { product_name: string } | null;
+}
+
+export interface DispatchableOrder {
+  order_id: number;
+  order_type: "REGULAR" | "VAP";
+  order_date: string;
+  is_same_day: boolean;
+  customer_master: { customer_name: string } | null;
+  delivery_location: { location_name: string } | null;
+  customer_order_line: DispatchableOrderLine[];
+}
+
+export function useDispatchableOrders() {
+  return useQuery({
+    queryKey: ["dispatchable-orders"],
+    queryFn: async (): Promise<DispatchableOrder[]> => {
+      const { data, error } = await supabase
+        .from("customer_order")
+        .select(
+          "order_id, order_type, order_date, is_same_day, customer_master(customer_name), delivery_location(location_name), customer_order_line(order_line_id, product_id, ordered_qty, vap_confirmation_status, product_master(product_name))",
+        )
+        .eq("order_status", "PLACED")
+        .order("order_date");
+      if (error) throw new Error(error.message);
+      return data as unknown as DispatchableOrder[];
+    },
+  });
+}
+```
+
+### src/hooks/useInventoryBalances.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export function useInventoryBalances() {
+  return useQuery({
+    queryKey: ["inventory-balances"],
+    queryFn: async (): Promise<Map<number, number>> => {
+      const { data, error } = await supabase
+        .from("inventory_balance")
+        .select("product_id, current_quantity");
+      if (error) throw new Error(error.message);
+      return new Map(data.map((r) => [r.product_id, Number(r.current_quantity)]));
+    },
+  });
+}
+```
+
+### src/hooks/useRecentDispatchLines.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DispatchLineForAdjustment {
+  dispatch_line_id: number;
+  product_id: number;
+  ordered_base_qty: number;
+  dispatched_base_qty: number;
+  product_master: { product_name: string } | null;
+  dispatch_record: {
+    dispatch_date: string;
+    customer_order: { customer_master: { customer_name: string } | null } | null;
+  } | null;
+}
+
+export function useRecentDispatchLines() {
+  return useQuery({
+    queryKey: ["recent-dispatch-lines"],
+    queryFn: async (): Promise<DispatchLineForAdjustment[]> => {
+      const { data, error } = await supabase
+        .from("dispatch_line")
+        .select(
+          "dispatch_line_id, product_id, ordered_base_qty, dispatched_base_qty, product_master(product_name), dispatch_record(dispatch_date, customer_order(customer_master(customer_name)))",
+        )
+        .order("dispatch_line_id", { ascending: false })
+        .limit(50);
+      if (error) throw new Error(error.message);
+      return data as unknown as DispatchLineForAdjustment[];
+    },
+  });
+}
+```
+If the double-nested embed (`dispatch_record(customer_order(customer_master(...)))`)
+errors, fall back to fetching dispatch_line and dispatch_record separately
+and joining client-side by dispatch_id — same fallback approach used
+elsewhere in this project, don't fight the embed syntax for long.
+
+---
+
+## PART 2 — Rebuild dispatch-planning.tsx
+
+Remove all mock data (`customers, products, inventoryLevels` imports and
+`mockDispatchPlanning`). Use `useDispatchableOrders()` and
+`useInventoryBalances()`.
+
+For each order, show: customer name, delivery location, order type badge
+(REGULAR/VAP), and each line showing product name + ordered qty + available
+stock (from the balances map) side by side — this is now purely a PREVIEW,
+not an editable input. There is no "type in the dispatched amount" field
+anymore — `confirm_dispatch` does all the ordered-vs-available capping
+automatically on the backend; the UI's job is just to let staff see what
+will happen before confirming.
+
+If any line's `vap_confirmation_status === "PENDING_CONFIRMATION"`, show the
+whole order as blocked with a clear message ("N VAP line(s) awaiting
+confirmation — resolve on the VAP Queue page first") and disable its Confirm
+button — don't try to build VAP confirmation into this page.
+
+Confirm button, one per order:
+```ts
+const { data, error } = await supabase.rpc("confirm_dispatch", {
+  p_order_id: order.order_id,
+});
+```
+On success, show the real result — `data[0].had_shortage`, `data[0].invoice_amount`
+— e.g. a toast saying "Dispatched. Invoice: ₹X" or, if `had_shortage` is true,
+"Dispatched with a shortage — Owner has been notified." (that notification is
+already handled server-side, this is just reflecting it back). Invalidate
+`["dispatchable-orders"]` and `["inventory-balances"]` on success.
+
+---
+
+## PART 3 — Rebuild dispatch-confirmation.tsx
+
+Remove the `dispatches` mock array and the `BRD_REASON_CODES` import. Use
+`useRecentDispatchLines()`. This becomes a per-LINE list, not per-dispatch —
+each row is one product from one dispatch, not a combined text summary.
+
+Table columns: Customer, Dispatch Date, Product, Dispatched Qty, Actions
+("Report Issue" button — every line gets this option, there's no
+"pending/confirmed" state on a dispatch_line itself in the real schema, so
+don't try to model one).
+
+"Report Issue" dialog fields: Delivered Quantity (input, default = the
+line's dispatched_base_qty), Reason (select: Shortage / Damage / Return /
+Manual Adjustment — four options only, no Leakage), Remarks (text).
+
+Submit:
+```ts
+const { error } = await supabase.rpc("log_delivery_adjustment", {
+  p_dispatch_line_id: line.dispatch_line_id,
+  p_adjustment_type: reasonType.toUpperCase().replace(" ", "_"), // "Manual Adjustment" -> "MANUAL_ADJUSTMENT"
+  p_delivered_qty: deliveredQty,
+  p_remarks: remarks || null,
+});
+```
+Only actually call this if `deliveredQty < line.dispatched_base_qty` — no
+reason to log a zero-impact adjustment for a line that arrived exactly as
+dispatched. If delivered equals dispatched, just close the dialog with no
+RPC call.
+
+Remove the "Confirm All Pending" button and the Confirmed/Pending/Issues stat
+cards entirely — those all depended on a per-dispatch status concept that
+doesn't exist for dispatch_line rows in the real schema. Replace the stats
+row with something simpler and real, e.g. total dispatch lines shown and how
+many currently have a logged adjustment (can compute this by also querying
+`delivery_adjustment` grouped by `dispatch_line_id`, or simply drop the stats
+row entirely if that feels like scope creep — your call on that specific
+piece, it's cosmetic either way).
+
+## Deliverable
+
+dispatch-planning.tsx shows real placed orders with real stock previews and
+actually dispatches them via the real RPC, correctly blocked on pending VAP
+lines. dispatch-confirmation.tsx correctly operates per dispatch line, offers
+only the four staff-usable reason codes, and only calls the backend when
+there's an actual discrepancy to report.

@@ -1,0 +1,110 @@
+Read the attached Dairy ERP Business Requirements Document completely before generating any code.
+
+Objective:
+Create a complete UI/UX prototype only.
+
+STRICT RULES:
+
+* UI only.
+* No backend.
+* No database.
+* No authentication logic.
+* No API integrations.
+* No Tally integration implementation.
+* No Vertex integration implementation.
+* No business logic implementation.
+* Use mock/sample data everywhere.
+
+Build a professional ERP suitable for a dairy manufacturing and distribution business.
+
+Required Modules:
+
+1. Dashboard
+
+2. Procurement
+
+   * Village Collection
+   * Local Purchase
+   * Collection Reports
+
+3. Farmer Settlement
+
+   * 10-Day Settlement
+   * Settlement History
+
+4. Production
+
+   * Production Entry
+   * Production History
+
+5. Inventory
+
+   * Stock Dashboard
+   * Product Master
+   * Stock Adjustments
+
+6. Customer Management
+
+   * Customer Master
+   * Customer Users
+   * Delivery Locations
+   * Customer Product Mapping
+   * Customer Pricing
+
+7. Orders
+
+   * Order Entry
+   * Same-Day Orders
+   * Order History
+
+8. Dispatch
+
+   * Dispatch Planning
+   * Dispatch Tracking
+   * Shortage & Leakage Management
+
+9. Billing
+
+   * Invoice Preview
+   * Customer Statements
+   * Outstanding Summary
+
+10. Payments
+
+    * Payment Entry
+    * Payment History
+    * Bank Reconciliation
+
+11. Tally Integration
+
+    * Sync Dashboard
+    * Voucher Queue
+    * Sync Logs
+
+12. Administration
+
+    * Users
+    * Roles & Permissions
+    * Audit Logs
+    * Settings
+
+Customer Portal:
+
+* Customer Dashboard
+* Place Order
+* Order History
+* Invoice History
+* Payment History
+* Outstanding Balance
+
+UI Requirements:
+
+* Modern responsive design
+* Sidebar navigation
+* Search, filters and tables
+* Charts and KPI cards
+* Realistic dairy business sample data
+* Professional ERP appearance
+
+Output:
+Create a fully navigable prototype that can be reviewed by business stakeholders before database and backend development begin.

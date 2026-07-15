@@ -1,0 +1,207 @@
+# Dairy ERP - UI Correction Prompt (Pre-Database Fixes)
+
+Review the existing Dairy ERP UI prototype against the Business Requirements Document again.
+
+This is a CORRECTION PASS before Database Architecture (Phase 2B) begins. A structural
+review found gaps between the BRD and the current UI that must be fixed before the
+database schema is designed around the UI as it stands today.
+
+IMPORTANT:
+
+* UI ONLY
+* Do NOT implement backend
+* Do NOT implement database
+* Do NOT implement APIs
+* Do NOT implement Tally integration
+* Do NOT implement authentication logic
+* Keep all existing pages, routes, and navigation structure unless a section below
+  explicitly says to change it
+* Continue using mock/sample data everywhere, following the existing patterns in
+  src/data/mock.ts
+
+---
+
+## 1. Fix the Role Model — 4 roles exist, BRD requires 6
+
+The role switcher in ERPLayout.tsx, and the role lists in admin-roles.tsx and
+admin-users.tsx, currently show only: Owner, Manager, Accountant, Delivery Manager.
+
+Add the two missing roles from the BRD:
+
+* Administrator — manages users, product master, UOM master, billing cycles, ordering
+  cutoff time, customer-specific pricing, late payment rates. Cannot approve financial
+  transactions.
+* Collection Operator — triggers Vertex import, enters direct collection records, views
+  collection reports. Cannot approve financial transactions, cannot access billing or
+  dispatch.
+
+Owner and Administrator are DISTINCT roles, not the same person. Owner approves
+customers, configures pricing/cutoff times, approves new delivery addresses. Administrator
+configures the system but cannot approve anything financial. Update the role switcher,
+admin-roles.tsx, and admin-users.tsx to reflect all 6 roles with their correct, distinct
+permission sets from BRD Section 11.
+
+---
+
+## 2. Fix Customer Onboarding — Add Missing Required Fields
+
+The "Add Customer" dialog in customers-master.tsx is missing two fields the BRD lists as
+required on every customer account:
+
+* Billing Cycle — 10-day or 30-day, selectable per customer
+* Status must default to "Pending Approval", not "Active". Add an Owner-approval action
+  (button or workflow) elsewhere in the UI that moves a customer from Pending Approval to
+  Active. A newly added customer must NOT be Active immediately.
+
+Also fix the Customer Type / Category options. Replace the current list
+(Apartment/Hotel/Restaurant/Office/Retail) with the BRD's actual list:
+Apartment/Hotel/Factory/Office/Retail/Commercial.
+
+Add a visible indicator (banner, checklist, or badge) on the customer detail/profile view
+showing whether all 5 required components are set up: account info, at least one customer
+user, at least one delivery location, at least one assigned product, at least one active
+price. A customer should not be shown as fully "Active" if any of these are missing.
+
+Leave the existing Credit Limit field in place for now, but visually separate it from the
+BRD-required fields (e.g. a distinct "Internal / Not in BRD — confirm with client" section
+or note) so it's clearly flagged as a field awaiting a business decision, not a BRD
+requirement.
+
+---
+
+## 3. Fix Order Placement — Add Delivery Location Selection and Multi-Unit Support
+
+On portal-place-order.tsx:
+
+* Add a delivery location selector at the top of the screen, before product selection.
+  If the customer has only one location, pre-select it automatically and show it as
+  read-only context. If they have multiple (see Prestige Towers mock data — 3 locations),
+  require an explicit selection before products can be added. Every order must show which
+  delivery location it belongs to.
+* Support ordering the same product in more than one unit within a single order (e.g. the
+  same milk product in Liters AND Packets AND Trays at once, converting to a base unit
+  behind the scenes). Update the product selection UI so each product row can accept
+  multiple unit/quantity pairs, not just one quantity in one fixed unit.
+* Filter the product list to only show products assigned to the logged-in customer
+  (use/extend the existing customerPricing / product-mapping mock data pattern), rather
+  than the full global product catalogue.
+
+Add "Place Order" to the portal navigation (both primaryNav and secondaryNav in
+PortalLayout.tsx) — it currently has no navigation entry point at all.
+
+Clarify the relationship between the three order-related portal pages (Milk Orders, VAP
+Orders, Place Order) — either make Milk Orders and VAP Orders the entry points that lead
+into product-specific ordering flows, or make Place Order the single entry point that
+splits internally by product type. Pick one structure and make the navigation consistent
+with it.
+
+---
+
+## 4. Remove the Confirmation Gate from Milk Orders
+
+order-entry.tsx currently shows a "Confirmed / Draft" status per order with a "Bulk
+Confirm" action. Per the BRD, milk orders have NO approval or confirmation gate — admin
+review is operational visibility only. Remove the Confirmed/Draft status and Bulk Confirm
+action from this screen. Orders should appear here for visibility and go straight to
+dispatch planning, with no confirm step.
+
+This confirmation workflow (Pending Confirmation → Confirmed / Not Available) is only
+correct for Value Added Product orders — confirm that orders-vap-queue.tsx is where this
+gate actually lives, and that order-entry.tsx no longer duplicates it for regular milk
+orders.
+
+Also add the delivery location as a visible column on order-entry.tsx (a customer with
+multiple locations needs each order's location shown, not just the customer name).
+
+---
+
+## 5. Add the Missing Dispatch-Time Stock Shortage Screen
+
+The BRD describes two distinct situations, and only one currently has a screen:
+
+* Already built (dispatch-confirmation.tsx, delivery-partner.tsx): post-delivery issues
+  — leakage, damage, shortage discovered during or after delivery. Keep this as is.
+* Missing: dispatch-time stock shortage — at the moment of loading the vehicle, available
+  stock is less than what was ordered (e.g. 100L ordered, only 98L in stock). In this
+  case, only 98L is dispatched, the invoice is based on the dispatched 98L directly (no
+  credit needed), and the Owner is notified of the shortage.
+
+Add this as a distinct step or indicator in dispatch-planning.tsx or dispatch-confirmation.tsx:
+when planned dispatch quantity would exceed available stock, show a clear warning, cap the
+dispatch at available stock, and show an "Owner notified" indicator. This must be visually
+and functionally distinct from the post-delivery adjustment workflow — do not merge the
+two into the same form or the same status list.
+
+---
+
+## 6. Reconcile Adjustment Reason Codes
+
+dispatch-confirmation.tsx and delivery-partner.tsx currently use two different reason-code
+lists for what should be the same kind of event:
+
+* dispatch-confirmation.tsx: Leakage / Short Delivery / Damaged / Customer Absent
+* delivery-partner.tsx: separate Shortage and Leakage reason lists that don't match
+
+Standardize both screens on the BRD's 5 official reason codes: Leakage, Shortage, Damage,
+Return, Manual Adjustment. Add "Return" as a selectable reason somewhere in the adjustment
+flow — it currently doesn't appear on either screen.
+
+---
+
+## 7. Build the Itemized Billing Statement Breakdown
+
+customer-statements.tsx currently shows a single "Gross Value" and one signed "Adjustments"
+number per statement. Per the BRD, a statement must show:
+
+* Total Supply Value
+* Individual credit lines, one per adjustment, labeled by reason code (e.g. "Less:
+  Leakage credit — 12 Jul, Toned Milk, 2L — ₹116")
+* Net Amount Payable as the final line
+
+Add a statement detail view (a new page or an expandable row/dialog from the existing
+list) that shows this exact breakdown, matching the worked example format in the BRD.
+
+---
+
+## 8. Fix Stub Routes That Reuse Unrelated Components
+
+In App.tsx, three routes currently render a component that has nothing to do with what
+they're supposed to show. Give each its own real content:
+
+* /orders/same-day currently renders OrdersHistory — build a real, distinct same-day
+  order exception page (a simple entry form + list is enough; note that it's a rare-use
+  exception flow, recorded separately from regular next-day orders, with an "Owner
+  notified" indicator).
+* /customers/product-mapping currently renders CustomersPricing — build a real product
+  assignment screen (which products a customer can order at all) as distinct from pricing
+  (what they pay). A product must be assignable before a price can be set for it.
+* /delivery/reports and /delivery/profile both currently render DeliveryPartner (the "My
+  Route" screen) — give each a real, distinct, simple screen appropriate to a delivery
+  partner's mobile app (Reports: a short list of past routes/deliveries; Profile: basic
+  driver info).
+
+---
+
+## 9. Add Missing Navigation Entries
+
+The following pages exist and route correctly but have no link anywhere in the sidebar or
+top nav, so they're only reachable by typing the URL directly. Add a nav entry for each,
+grouped under their existing section:
+
+* Procurement: Centers, FAT/SNF, Vertex History
+* Farmer Settlement: Voucher, Export
+* Dispatch: Route Planning, Vehicles, Partners, Confirmation
+* Billing & Payments: Aging, Credit Notes, Shortage Adjustments
+* Tally Integration: Failed, Resync
+* Administration: Login Audit
+* Customers: Profile, Documents, Activity, Credit
+* Portal: Catalogue (in addition to Place Order from Section 3 above)
+
+---
+
+## Deliverable
+
+Produce an updated stakeholder-review-ready UI prototype with the above corrections. This
+version is what gets frozen for Phase 2B — Database Architecture & Backend Design — so
+every field, role, and workflow listed above needs to actually be visible in the UI, not
+just planned.

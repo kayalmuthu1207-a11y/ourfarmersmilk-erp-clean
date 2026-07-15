@@ -1,0 +1,209 @@
+# Dairy ERP - Billing: Statements & Payment Entry
+
+IMPORTANT:
+
+* Do NOT touch any page other than customer-statements.tsx and
+  payments-entry.tsx
+* Every RPC parameter uses a `p_` prefix — use exact names
+* Your real schema has only two statement statuses: DRAFT and APPROVED —
+  there is no separate "Pending Approval" status. Treat every DRAFT as
+  awaiting review/approval; collapse the old three-way Draft/Pending
+  Approval/Approved filter down to two.
+* "Push Approved to Tally" already happens automatically as a side effect of
+  approving a statement (queued for a separate accountant approval step, not
+  part of this prompt) — remove that button entirely rather than wire it to
+  anything, it doesn't correspond to a separate manual action from this screen
+
+---
+
+## PART 1 — New hooks
+
+### src/hooks/useBillingStatements.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface BillingStatementLine {
+  statement_line_id: number;
+  line_amount: number;
+  line_description: string | null;
+}
+
+export interface BillingStatement {
+  statement_id: number;
+  customer_id: number;
+  cycle_start_date: string;
+  cycle_end_date: string;
+  total_amount: number | null;
+  status: "DRAFT" | "APPROVED";
+  customer_master: { customer_name: string } | null;
+  billing_statement_line: BillingStatementLine[];
+}
+
+export function useBillingStatements() {
+  return useQuery({
+    queryKey: ["billing-statements"],
+    queryFn: async (): Promise<BillingStatement[]> => {
+      const { data, error } = await supabase
+        .from("billing_cycle_statement")
+        .select(
+          "statement_id, customer_id, cycle_start_date, cycle_end_date, total_amount, status, customer_master(customer_name), billing_statement_line(statement_line_id, line_amount, line_description)",
+        )
+        .order("statement_id", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as unknown as BillingStatement[];
+    },
+  });
+}
+```
+
+### src/hooks/useApprovedStatementsForCustomer.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface ApprovedStatement {
+  statement_id: number;
+  cycle_start_date: string;
+  cycle_end_date: string;
+  total_amount: number | null;
+}
+
+export function useApprovedStatementsForCustomer(customerId: number | undefined) {
+  return useQuery({
+    queryKey: ["approved-statements", customerId],
+    enabled: customerId !== undefined,
+    queryFn: async (): Promise<ApprovedStatement[]> => {
+      const { data, error } = await supabase
+        .from("billing_cycle_statement")
+        .select("statement_id, cycle_start_date, cycle_end_date, total_amount")
+        .eq("customer_id", customerId!)
+        .eq("status", "APPROVED")
+        .order("cycle_end_date", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### src/hooks/useRecentPayments.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface RecentPayment {
+  payment_id: number;
+  payment_amount: number;
+  payment_date: string;
+  payment_method: string | null;
+  customer_master: { customer_name: string } | null;
+}
+
+export function useRecentPayments() {
+  return useQuery({
+    queryKey: ["recent-payments"],
+    queryFn: async (): Promise<RecentPayment[]> => {
+      const { data, error } = await supabase
+        .from("customer_payment")
+        .select("payment_id, payment_amount, payment_date, payment_method, customer_master(customer_name)")
+        .order("payment_id", { ascending: false })
+        .limit(10);
+      if (error) throw new Error(error.message);
+      return data as unknown as RecentPayment[];
+    },
+  });
+}
+```
+
+---
+
+## PART 2 — Rebuild customer-statements.tsx
+
+Remove `mockStatements`, `makeAdjustments`, and the `customers` mock import.
+Use `useBillingStatements()` and `useCustomers()` (already built).
+
+For each statement, derive: Total Supply Value = sum of `line_amount` where
+`line_amount > 0`; Total Credits = sum of `Math.abs(line_amount)` where
+`line_amount < 0`; Net Payable = `total_amount` (already computed correctly
+by the backend — use it directly, don't recompute it from the lines).
+
+Add a new section above the table: "Generate Statement" — a customer select
+(filtered to `billing_mode === "CYCLE"` from `useCustomers()`, since only
+cycle-billed customers have a cycle to generate) plus a button:
+```ts
+const { data, error } = await supabase.rpc("generate_billing_cycle", {
+  p_customer_id: selectedCustomerId,
+});
+```
+Show the real error message if it fails (e.g. "too early to close this
+cycle" is a real, expected rejection — display it plainly, not as a generic
+failure). Invalidate `["billing-statements"]` on success.
+
+Wire "Approve" to:
+```ts
+const { error } = await supabase.rpc("approve_billing_statement", {
+  p_statement_id: stmt.statement_id,
+});
+```
+Only show this button when `stmt.status === "DRAFT"`. Invalidate
+`["billing-statements"]` on success.
+
+Statement breakdown dialog: show each `billing_statement_line` as its own
+row exactly like the mock already does (positive lines as plain amounts,
+negative lines prefixed "Less:" and shown as a credit) — this part of the
+existing design was already correct, just feed it real `billing_statement_line`
+data instead of the fake `adjustments` array.
+
+Remove the "Push Approved to Tally" button per the note above. Remove
+"Download PDF" for now — leave a TODO comment, no PDF generation exists yet.
+
+---
+
+## PART 3 — Rebuild payments-entry.tsx
+
+Remove the `customers` mock import and the hardcoded `recent` array. Use
+`useCustomers()`, `useCustomerOutstandingBalances()` (already built in an
+earlier prompt), `useApprovedStatementsForCustomer()`, and
+`useRecentPayments()`.
+
+When a customer is selected: show their real outstanding balance (from the
+balances map, default ₹0 if not present). Check their `billing_mode`:
+- If `"CYCLE"`: show a statement select, populated from
+  `useApprovedStatementsForCustomer(selectedCustomerId)`, each option showing
+  cycle dates + total amount. This becomes required before submitting.
+- If `"DAILY"` or `"PAY_ON_DELIVERY"`: show a note instead — "This customer
+  pays directly, no statement required" — and skip the statement field
+  entirely.
+
+Remove the free-text "Against Statement" input entirely — it's being
+replaced by the real select described above.
+
+Wire "Record Payment" to:
+```ts
+const { error } = await supabase.rpc("record_payment", {
+  p_customer_id: selectedCustomerId,
+  p_payment_amount: Number(amount),
+  p_statement_id: billingMode === "CYCLE" ? selectedStatementId : null,
+  p_payment_date: paymentDate,
+  p_payment_method: mode || null,
+});
+```
+On success, clear the form and invalidate `["recent-payments"]`,
+`["billing-statements"]`, and `["customer-outstanding-balances"]` (all three
+change as a result of a payment). On error, show the real message — e.g. a
+CYCLE customer with no statement selected should surface the RPC's own
+"A billing statement is required" message, not a generic one.
+
+"Recent Payments Today" table: use `useRecentPayments()` for real data. Note
+this shows the 10 most recent payments overall, not filtered to today
+specifically — leave a TODO if you want an actual date filter added later,
+don't fake a "Confirmed" status column since customer_payment has no status
+concept at all (a payment that exists, exists — there's nothing to confirm).
+
+## Deliverable
+
+Both screens fully real: statements show actual itemized breakdowns and can
+be generated + approved through the real workflow; payments correctly
+require a statement for CYCLE customers and skip it for DAILY/PAY_ON_DELIVERY
+customers, matching the real business rule this was built around.

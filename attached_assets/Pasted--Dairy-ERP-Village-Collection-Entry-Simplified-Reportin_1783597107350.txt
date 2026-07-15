@@ -1,0 +1,225 @@
+# Dairy ERP - Village Collection: Entry & Simplified Reporting
+
+IMPORTANT:
+
+* Do NOT touch any other page
+* Every RPC parameter uses a `p_` prefix — use exact names
+* Do NOT invent FAT/SNF, shift (AM/PM), or per-village rate data anywhere —
+  none of it exists in the real schema. Every column showing this in the
+  current mock UI must be removed, not estimated or left as a fake number.
+* Do NOT build a Vertex CSV import/upload feature in this pass — that's
+  bigger, separate work (file parsing). Leave a clear TODO instead.
+* farmer-settlement-*.tsx and procurement-fat-snf.tsx are correctly out of
+  scope entirely — do not touch them, no RPC exists for farmer settlement yet
+
+---
+
+## PART 1 — New hooks
+
+### src/hooks/useVillages.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface Village {
+  village_id: number;
+  village_name: string;
+}
+
+export function useVillages() {
+  return useQuery({
+    queryKey: ["villages"],
+    queryFn: async (): Promise<Village[]> => {
+      const { data, error } = await supabase
+        .from("village_master")
+        .select("village_id, village_name")
+        .order("village_name");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### src/hooks/useFarmersByVillage.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface Farmer {
+  farmer_id: number;
+  farmer_name: string;
+  village_id: number;
+}
+
+export function useFarmersByVillage(villageId: number | undefined) {
+  return useQuery({
+    queryKey: ["farmers", villageId],
+    enabled: villageId !== undefined,
+    queryFn: async (): Promise<Farmer[]> => {
+      const { data, error } = await supabase
+        .from("farmer_master")
+        .select("farmer_id, farmer_name, village_id")
+        .eq("village_id", villageId!)
+        .order("farmer_name");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### src/hooks/useVillageCollectionSummary.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface VillageCollectionSummary {
+  village_id: number;
+  village_name: string;
+  farmer_count: number;
+  total_qty: number;
+  consolidated: boolean;
+}
+
+// Real, derived data only — no shift split, no FAT/SNF, no rate. Computed
+// client-side from raw rows since there's no aggregate view for this yet.
+export function useVillageCollectionSummary(date: string) {
+  return useQuery({
+    queryKey: ["village-collection-summary", date],
+    queryFn: async (): Promise<VillageCollectionSummary[]> => {
+      const { data: villages, error: villagesError } = await supabase
+        .from("village_master")
+        .select("village_id, village_name");
+      if (villagesError) throw new Error(villagesError.message);
+
+      const { data: records, error: recordsError } = await supabase
+        .from("milk_collection_record")
+        .select("village_id, farmer_id, quantity")
+        .eq("collection_date", date);
+      if (recordsError) throw new Error(recordsError.message);
+
+      const { data: consolidations, error: consolidationsError } = await supabase
+        .from("village_procurement_consolidation")
+        .select("village_id")
+        .eq("procurement_date", date);
+      if (consolidationsError) throw new Error(consolidationsError.message);
+
+      const consolidatedVillageIds = new Set(consolidations.map((c) => c.village_id));
+
+      return villages.map((v) => {
+        const villageRecords = records.filter((r) => r.village_id === v.village_id);
+        return {
+          village_id: v.village_id,
+          village_name: v.village_name,
+          farmer_count: new Set(villageRecords.map((r) => r.farmer_id)).size,
+          total_qty: villageRecords.reduce((s, r) => s + Number(r.quantity), 0),
+          consolidated: consolidatedVillageIds.has(v.village_id),
+        };
+      });
+    },
+  });
+}
+```
+
+### src/hooks/useVertexImportBatches.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface VertexImportBatch {
+  import_batch_id: number;
+  imported_at: string;
+  record_count: number;
+  total_qty: number;
+}
+
+export function useVertexImportBatches() {
+  return useQuery({
+    queryKey: ["vertex-import-batches"],
+    queryFn: async (): Promise<VertexImportBatch[]> => {
+      const { data: batches, error: batchesError } = await supabase
+        .from("vertex_import_batch")
+        .select("import_batch_id, imported_at")
+        .order("import_batch_id", { ascending: false })
+        .limit(30);
+      if (batchesError) throw new Error(batchesError.message);
+
+      const { data: records, error: recordsError } = await supabase
+        .from("milk_collection_record")
+        .select("import_batch_id, quantity")
+        .not("import_batch_id", "is", null);
+      if (recordsError) throw new Error(recordsError.message);
+
+      return batches.map((b) => {
+        const batchRecords = records.filter((r) => r.import_batch_id === b.import_batch_id);
+        return {
+          import_batch_id: b.import_batch_id,
+          imported_at: b.imported_at,
+          record_count: batchRecords.length,
+          total_qty: batchRecords.reduce((s, r) => s + Number(r.quantity), 0),
+        };
+      });
+    },
+  });
+}
+```
+
+---
+
+## PART 2 — Rebuild procurement-village-collection.tsx
+
+Remove `villages, farmers` mock import and the fake `today` array. Use
+`useVillageCollectionSummary(selectedDate)` (default to today's date, keep
+the existing date selector but wire it to actually change the query).
+
+Table columns become: Village, Farmer Count, Total Qty (L), Status
+(Consolidated / Not Yet). Remove AM/PM split, Avg FAT, Avg SNF, Rate, and
+Amount columns entirely — leave a comment noting these will come back once
+FAT/SNF and rate capture are actually defined.
+
+Add a new "Add Collection Record" button + dialog: Village (select, from
+`useVillages()`), Farmer (select, from `useFarmersByVillage(selectedVillageId)`,
+disabled until a village is picked), Date, Quantity. Submit:
+```ts
+const { error } = await supabase.rpc("enter_direct_collection", {
+  p_farmer_id: selectedFarmerId,
+  p_collection_date: date,
+  p_quantity: Number(quantity),
+});
+```
+
+Add a "Consolidate" action per village row (only enabled when `!consolidated`
+and `total_qty > 0`):
+```ts
+const { error } = await supabase.rpc("consolidate_village_procurement", {
+  p_village_id: row.village_id,
+  p_procurement_date: date,
+});
+```
+Invalidate `["village-collection-summary", date]` on success for both
+mutations.
+
+---
+
+## PART 3 — Rebuild procurement-vertex-history.tsx
+
+Remove the entire fake `imports` array. Use `useVertexImportBatches()`.
+
+Table columns become: Batch ID, Imported At, Records, Total Qty (L). Remove
+Shift, Import Time, File Name, Method, Status, and Reconciled entirely — none
+of this exists on `vertex_import_batch`. Remove the "Re-import" button and
+the shift/status filters.
+
+Add a note near the top of the page: "Automated Vertex CSV import isn't
+built yet — collection records are currently entered manually via Village
+Collection → Add Collection Record." Do not attempt to build file upload
+here.
+
+## Deliverable
+
+Both pages show only real, derived data — sparser than the current mock
+design, on purpose. Village Collection gets real add-record and consolidate
+actions. Vertex History becomes a simple, honest log of what
+`import_batch_id` groupings actually exist. Farmer settlement and FAT/SNF
+pages remain untouched, correctly still blocked on your client's input.

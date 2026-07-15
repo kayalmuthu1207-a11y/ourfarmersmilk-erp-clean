@@ -1,0 +1,196 @@
+# Replit Agent Prompt — Navigation Fixes + Route Planning UX
+
+Paste everything below into Replit Agent as one prompt.
+
+---
+
+## Part A — Root cause of the "Back to ERP → Login" bug (confirmed, not guessed)
+
+In `src/App.tsx`, the `ERP` wrapper function wraps its children in
+`<ProtectedRoute>` (requiring a real auth session), but the `Portal` and
+`Delivery` wrapper functions do **not** — they render their layouts with no
+auth check at all. So if someone reaches a Portal or Delivery page without
+having first passed through the ERP login gate, no session exists yet — and
+clicking "Back to ERP" correctly (from the code's own logic) hits
+`ProtectedRoute` for the first time and redirects to login. This isn't a
+crash or a broken link — it's a real gap in which routes require auth.
+
+**The fix:** since Portal and Delivery pages are currently staff-only tools
+anyway (both explicitly built as stand-ins until real customer/partner login
+exists), wrap them in the same `ProtectedRoute` guard as ERP. This makes the
+whole app single-session — by the time anyone is inside Portal or Delivery,
+they've already authenticated, so "Back to ERP" will always return to an
+already-live Dashboard instead of hitting the guard fresh.
+
+### A1. Update `src/App.tsx`
+
+Change:
+```tsx
+function Portal({ children }: { children: React.ReactNode }) {
+  return <PortalLayout>{children}</PortalLayout>;
+}
+function Delivery({ children }: { children: React.ReactNode }) {
+  return <DeliveryLayout>{children}</DeliveryLayout>;
+}
+```
+to:
+```tsx
+function Portal({ children }: { children: React.ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <PortalLayout>{children}</PortalLayout>
+    </ProtectedRoute>
+  );
+}
+function Delivery({ children }: { children: React.ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <DeliveryLayout>{children}</DeliveryLayout>
+    </ProtectedRoute>
+  );
+}
+```
+
+### A2. Confirm the "Back to ERP" links themselves are correct
+
+`PortalLayout.tsx` already has `<Link href="/">Back to ERP</Link>` in a few
+places — these are correct as-is once A1 is applied (they'll now always have
+a live session to return to). No change needed there.
+
+---
+
+## Part B — Add a visible "Back to ERP" button to the Delivery Partner Portal
+
+Found the actual cause of "no visible button": `DeliveryLayout.tsx` currently
+has a link back to `/`, but it's just an unlabeled circular avatar icon (the
+"SK" initials badge) — there's no text or icon indicating what it does.
+
+### B1. Update `src/components/layout/DeliveryLayout.tsx`
+
+Replace the unlabeled avatar-only link:
+```tsx
+<Link href="/">
+  <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center">
+    <span className="text-sm font-bold text-primary">SK</span>
+  </div>
+</Link>
+```
+with a clearly labeled button, placed so it's visible on every Delivery
+Partner page (keep the existing avatar if you like, but add a real labeled
+control alongside or instead of it):
+```tsx
+<Link href="/">
+  <Button variant="ghost" size="sm" className="gap-1.5" data-testid="link-back-to-erp">
+    <ArrowLeft className="h-4 w-4" />
+    Back to ERP
+  </Button>
+</Link>
+```
+Import `ArrowLeft` from `lucide-react` and `Button` from `@/components/ui/button`
+if not already imported in this file.
+
+---
+
+## Part C — Route Planning: expandable route cards with real data
+
+### C1. Create `src/hooks/useRouteDetails.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface RouteLocationDetail {
+  location_id: number;
+  location_name: string;
+  address: string | null;
+  customer_id: number;
+  customer_name: string;
+}
+
+export interface RouteDetail {
+  route_id: number;
+  route_name: string;
+  locations: RouteLocationDetail[];
+  todays_order_quantity: number;
+}
+
+export function useRouteDetails() {
+  return useQuery({
+    queryKey: ["route-details"],
+    queryFn: async (): Promise<RouteDetail[]> => {
+      const { data: routes, error: routesError } = await supabase
+        .from("delivery_route")
+        .select("route_id, route_name")
+        .order("route_name");
+      if (routesError) throw new Error(routesError.message);
+
+      const { data: locations, error: locError } = await supabase
+        .from("delivery_location")
+        .select("location_id, location_name, address, route_id, customer_id, customer_master(customer_name)")
+        .not("route_id", "is", null);
+      if (locError) throw new Error(locError.message);
+
+      const today = new Date().toISOString().slice(0, 10);
+      const customerIds = Array.from(new Set(locations.map((l: any) => l.customer_id)));
+
+      const { data: orders, error: ordersError } = await supabase
+        .from("customer_order")
+        .select("customer_id, customer_order_line(ordered_qty)")
+        .in("customer_id", customerIds.length ? customerIds : [-1])
+        .eq("order_date", today);
+      if (ordersError) throw new Error(ordersError.message);
+
+      const qtyByCustomer = new Map<number, number>();
+      orders.forEach((o: any) => {
+        const sum = (o.customer_order_line ?? []).reduce((s: number, l: any) => s + Number(l.ordered_qty), 0);
+        qtyByCustomer.set(o.customer_id, (qtyByCustomer.get(o.customer_id) ?? 0) + sum);
+      });
+
+      return routes.map((r) => {
+        const routeLocations = locations
+          .filter((l: any) => l.route_id === r.route_id)
+          .map((l: any) => ({
+            location_id: l.location_id,
+            location_name: l.location_name,
+            address: l.address,
+            customer_id: l.customer_id,
+            customer_name: l.customer_master?.customer_name ?? "Unknown",
+          }));
+        const totalQty = routeLocations.reduce((s, l) => s + (qtyByCustomer.get(l.customer_id) ?? 0), 0);
+        return {
+          route_id: r.route_id,
+          route_name: r.route_name,
+          locations: routeLocations,
+          todays_order_quantity: totalQty,
+        };
+      });
+    },
+  });
+}
+```
+
+### C2. Replace `src/pages/dispatch-route-planning.tsx`
+
+Build using an `Accordion` (from `@/components/ui/accordion`, already
+available in this project) — one `AccordionItem` per route from
+`useRouteDetails()`. The trigger shows: route name, location count, today's
+total order quantity. Expanding reveals:
+- A table/list of assigned customers and their delivery locations
+  (`location.customer_name`, `location.location_name`, `location.address`)
+- Today's total order quantity for the route (repeated inside for clarity)
+- **A note, not invented data:** "Delivery partner assignment isn't tracked
+  yet — there's no driver/partner entity in the schema. This will show once
+  that's built." Do not invent a partner name or leave this field blank
+  without explanation — say plainly why it's missing, same as other pages in
+  this app that are honest about gaps.
+
+Keep the loading/error state pattern consistent with the rest of the app.
+
+---
+
+## Before marking this complete
+
+Run the project's typecheck command and paste the actual output. Then
+describe (or screenshot) what happens when you: log into ERP, navigate to
+Portal, click "Back to ERP" — confirm it returns to a live Dashboard, not a
+login screen.

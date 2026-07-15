@@ -1,0 +1,294 @@
+# Dairy ERP - Product Master, Product Mapping & Pricing Redesign
+
+IMPORTANT:
+
+* Do NOT touch customers-master.tsx, login/auth files, or any other page
+* Every Supabase RPC parameter uses a `p_` prefix (e.g. `p_customer_id`,
+  `p_product_id`) — every `.rpc()` call below MUST use these exact names
+* product_master, product_category, and uom_master have NO price column
+  anywhere — there is no "base price" concept in this system. Every price is
+  set independently per customer-assignment. Do not add a price field to the
+  product form.
+* The old /inventory/product-master route (inventory-product-master.tsx) is
+  an orphaned duplicate with no working nav link — do not touch it, do not
+  wire it, it will be deleted separately later
+
+---
+
+## PART 1 — New hooks (create these four files exactly as given)
+
+### src/hooks/useProductCategories.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface ProductCategory {
+  category_id: number;
+  category_name: string;
+}
+
+export function useProductCategories() {
+  return useQuery({
+    queryKey: ["product-categories"],
+    queryFn: async (): Promise<ProductCategory[]> => {
+      const { data, error } = await supabase
+        .from("product_category")
+        .select("category_id, category_name")
+        .order("category_name");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### src/hooks/useUomMaster.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface Uom {
+  uom_id: number;
+  uom_code: string;
+  uom_name: string;
+}
+
+export function useUomMaster() {
+  return useQuery({
+    queryKey: ["uom-master"],
+    queryFn: async (): Promise<Uom[]> => {
+      const { data, error } = await supabase
+        .from("uom_master")
+        .select("uom_id, uom_code, uom_name")
+        .order("uom_name");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### Replace src/hooks/useProducts.ts entirely with:
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface Product {
+  product_id: number;
+  product_name: string;
+  category_id: number;
+  base_uom_id: number;
+  active_status: "ACTIVE" | "INACTIVE";
+  product_type: "MILK" | "VAP";
+  product_category: { category_name: string } | null;
+  uom_master: { uom_name: string } | null;
+}
+
+// No active_status filter here on purpose — this is now used by the admin
+// product master page, which needs to see and re-activate inactive products
+// too. A customer-facing product picker (later work) should filter for
+// ACTIVE itself, not rely on this hook doing it.
+export function useProducts() {
+  return useQuery({
+    queryKey: ["products"],
+    queryFn: async (): Promise<Product[]> => {
+      const { data, error } = await supabase
+        .from("product_master")
+        .select(
+          "product_id, product_name, category_id, base_uom_id, active_status, product_type, product_category(category_name), uom_master(uom_name)",
+        )
+        .order("product_name");
+      if (error) throw new Error(error.message);
+      return data as unknown as Product[];
+    },
+  });
+}
+```
+
+### src/hooks/useCustomerProductMappings.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface CustomerProductMapping {
+  mapping_id: number;
+  customer_id: number;
+  product_id: number;
+  uom_id: number;
+  display_name: string | null;
+  is_active: boolean;
+  product_master: { product_name: string } | null;
+  uom_master: { uom_name: string } | null;
+}
+
+// customerId omitted = every mapping across every customer (matches the
+// existing "All Customers" filter option already in the mapping page).
+export function useCustomerProductMappings(customerId?: number) {
+  return useQuery({
+    queryKey: ["customer-product-mappings", customerId ?? "all"],
+    queryFn: async (): Promise<CustomerProductMapping[]> => {
+      let query = supabase
+        .from("customer_product_mapping")
+        .select(
+          "mapping_id, customer_id, product_id, uom_id, display_name, is_active, product_master(product_name), uom_master(uom_name)",
+        )
+        .order("mapping_id");
+      if (customerId !== undefined) {
+        query = query.eq("customer_id", customerId);
+      }
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      return data as unknown as CustomerProductMapping[];
+    },
+  });
+}
+```
+
+### src/hooks/useCustomerPrices.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface CustomerPrice {
+  price_id: number;
+  mapping_id: number;
+  price: number;
+  effective_from: string;
+  effective_to: string | null;
+  customer_product_mapping: {
+    customer_id: number;
+    product_id: number;
+    uom_id: number;
+    display_name: string | null;
+    product_master: { product_name: string } | null;
+    uom_master: { uom_name: string } | null;
+  } | null;
+}
+
+// Only currently-active prices (effective_to IS NULL) — a customer's price
+// history isn't shown here, just what's in effect right now.
+export function useCustomerPrices() {
+  return useQuery({
+    queryKey: ["customer-prices"],
+    queryFn: async (): Promise<CustomerPrice[]> => {
+      const { data, error } = await supabase
+        .from("customer_price_master")
+        .select(
+          "price_id, mapping_id, price, effective_from, effective_to, customer_product_mapping(customer_id, product_id, uom_id, display_name, product_master(product_name), uom_master(uom_name))",
+        )
+        .is("effective_to", null)
+        .order("price_id");
+      if (error) throw new Error(error.message);
+      return data as unknown as CustomerPrice[];
+    },
+  });
+}
+```
+If this nested embed (`customer_product_mapping(...product_master(...), uom_master(...))`)
+errors or returns unexpected shapes, fall back to fetching `customer_price_master`
+and `customer_product_mapping` as two separate flat queries and joining them
+client-side by `mapping_id` — do not spend more than one attempt fighting the
+embed syntax.
+
+---
+
+## PART 2 — admin-products.tsx (routed at /admin/products — this is the real,
+nav-linked page; inventory-product-master.tsx is the orphan, leave it alone)
+
+Rebuild this page using `useProducts()`, `useProductCategories()`, and
+`useUomMaster()`. Remove entirely: SKU field, price field, the "Type"
+(Regular/Job Work/White Packet) field and its badge, the hardcoded
+CATEGORIES/TYPES/UNITS arrays, and `@/data/mock` import.
+
+Table columns become: Product Name, Category (from `product_category(category_name)`),
+Product Type (MILK/VAP badge), Unit (from `uom_master(uom_name)`), Active (toggle), Actions.
+
+Add/Edit dialog fields become: Product Name, Category (select, populated from
+`useProductCategories()`), Product Type (select: Milk / VAP), Base Unit
+(select, populated from `useUomMaster()`).
+
+Add Product → direct insert, no RPC (none exists for this, and none is
+needed — no approval workflow, just a table write):
+```ts
+const { error } = await supabase.from("product_master").insert({
+  product_name: form.name,
+  category_id: form.categoryId,
+  base_uom_id: form.baseUomId,
+  product_type: form.productType,
+});
+```
+Edit Product → direct update on `product_master` by `product_id`, same fields.
+Toggle Active → direct update: `.update({ active_status: newStatus })`.
+Invalidate the `["products"]` query key on every successful mutation.
+
+---
+
+## PART 3 — customers-product-mapping.tsx
+
+Rebuild using `useCustomerProductMappings()` (no customer filter = show all,
+matching current behavior) and `useProducts()` for the product picker, plus
+`useUomMaster()` for the new unit field.
+
+Add these two fields to the "Assign Product" dialog that don't exist yet:
+**Unit** (select, from `useUomMaster()`) and **Display Label** (optional text
+input, placeholder "Leave blank to use the product's own name — only set
+this if this customer should see a different label, e.g. \"Village Cow's
+Milk\"").
+
+Wire "Assign" to the real RPC:
+```ts
+const { error } = await supabase.rpc("assign_product_to_customer", {
+  p_customer_id: form.customerId,
+  p_product_id: form.productId,
+  p_uom_id: form.uomId,
+  p_display_name: form.displayName || null,
+});
+```
+Table should show the resolved label per row: `mapping.display_name ??
+mapping.product_master?.product_name`, plus the unit name and active status.
+Remove the "Remove" (delete) action for now — there's no RPC to deactivate a
+mapping yet; leave a TODO comment noting this specifically.
+
+---
+
+## PART 4 — customers-pricing.tsx — this one needs the most conceptual change
+
+Remove entirely: `basePrice`, the discount/savings calculations, the "Avg.
+Discount" stat card, and the "Base: ₹X" text in the product picker — none of
+this corresponds to anything real. There is no base price to discount from.
+
+Rebuild using `useCustomerPrices()` for the table and `useCustomerProductMappings(selectedCustomerId)`
+for the "which assignment am I pricing" picker in the Add/Edit dialog — **the
+picker must show assignments (mapping_id), not raw products**, since the same
+product can be assigned to one customer twice under two different labels
+(this is real — confirmed with actual customer data — and the UI needs to be
+able to represent both as separate, independently-priced rows).
+
+Dialog fields become: Customer (select), then **Assignment** (select,
+populated from that customer's mappings, each option showing the resolved
+label — `display_name ?? product name` — plus the unit), Price (₹), Effective
+From (date, default today).
+
+Wire "Save" to:
+```ts
+const { error } = await supabase.rpc("set_customer_price", {
+  p_mapping_id: form.mappingId,
+  p_price: form.price,
+  p_effective_from: form.effectiveFrom,
+});
+```
+
+Table columns: Customer, Assignment (resolved label + unit), Price,
+Effective From. No Base Price column, no Discount column.
+
+Invalidate `["customer-prices"]` on every successful save.
+
+## Deliverable
+
+All three pages read and write real data with no mock imports remaining in
+any of them. Product Master has no price/SKU/Type fields. Product Mapping
+supports unit + label assignment. Pricing is assignment-based, with no base
+price or discount concept anywhere. Two TODOs are expected and fine to leave:
+no delete/deactivate action on a mapping, and (from the mapping dialog) no
+way to browse only a customer's *unassigned* products yet — both flagged,
+neither silently faked.

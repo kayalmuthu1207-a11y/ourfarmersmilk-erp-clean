@@ -1,0 +1,119 @@
+Review the existing Dairy ERP UI prototype and BRD.
+
+This is the FINAL UI REVISION before database design begins.
+
+Do NOT implement backend, database, authentication, APIs, Tally integration, or Vertex integration.
+
+UI ONLY.
+
+Required Changes:
+
+1. Customer Portal Ordering
+
+Split ordering into two separate modules:
+
+A. Milk Orders
+
+* Milk products only
+* Includes regular milk products, branded milk products, and white packet milk products
+* Cutoff Time: 8:00 PM
+
+B. Value Added Product Orders
+
+* Paneer
+* Ghee
+* Butter
+* Curd
+* Cream
+* Any future value-added products
+* Separate ordering workflow
+* Afternoon cutoff time
+
+2. Product Management
+
+Add Administration screens:
+
+* Product Master
+* Add Product
+* Edit Product
+* Activate / Deactivate Product
+
+Products may contain:
+
+* Regular products
+* Job work milk products
+* White packet milk products
+
+3. Customer Management
+
+Add Administration screens:
+
+* Customer Master
+* Customer Users
+* Delivery Locations
+* Customer Pricing
+
+Requirements:
+
+* One customer can have multiple users.
+* One customer can have multiple delivery locations.
+* Customer portal should display all delivery locations belonging to the logged-in customer.
+
+4. Pricing
+
+Support customer-specific pricing.
+
+Example:
+
+* Customer A Milk Rate = ₹26
+* Customer B Milk Rate = ₹27
+
+Admin should be able to maintain pricing.
+
+5. Delivery Location Logic
+
+Delivery locations are operational entities.
+
+Example:
+
+Customer:
+Tilaga Enterprises
+
+Locations:
+
+* Unity Enclave
+* Green Residency
+* Lake View Apartments
+
+Customer portal should show all assigned locations.
+
+6. Settings
+
+Add configurable business settings:
+
+* Milk Order Cutoff Time
+* Value Added Product Cutoff Time
+
+7. Maintain Existing Modules
+
+Keep all existing modules unchanged:
+
+* Procurement
+* Village Collection
+* Local Purchase
+* Farmer Settlement
+* Production
+* Inventory
+* Orders
+* Dispatch
+* Billing
+* Payments
+* Tally Integration
+* User Management
+* Roles & Permissions
+
+Deliverable:
+
+Produce a final stakeholder-review-ready UI prototype.
+
+This UI will be frozen and used as the foundation for Phase 2B Database Design.

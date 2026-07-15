@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Dairy ERP"
+version = "1.0.0"
+id = "artifacts/dairy-erp"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25637
+
+[services.development]
+run = "pnpm --filter @workspace/dairy-erp run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dairy-erp", "run", "build" ]
+publicDir = "artifacts/dairy-erp/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25637"
+BASE_PATH = "/"

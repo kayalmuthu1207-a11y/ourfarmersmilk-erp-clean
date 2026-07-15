@@ -1,0 +1,173 @@
+# Dairy ERP - Place Order, Repurposed as a Staff Tool
+
+IMPORTANT:
+
+* Do NOT touch customers-master.tsx, admin-products.tsx,
+  customers-product-mapping.tsx, customers-pricing.tsx, login/auth files
+* Every RPC parameter uses a `p_` prefix — `.rpc()` calls below MUST use the
+  exact names shown
+* This screen is temporarily a STAFF tool (Owner/Administrator places an
+  order on behalf of a customer), not real customer self-service — there is
+  no real customer login yet. Build it with the structure below specifically
+  so the real customer portal version, later, is a small edit and not a
+  rewrite.
+* Remove the cutoff countdown badge and the "modify until 8 PM" message
+  entirely — staff-placed orders bypass cutoff by design (that's how
+  place_order's emergency-order path works), so both would be misleading here
+
+---
+
+## PART 1 — New hooks
+
+### src/hooks/useCustomerDeliveryLocations.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DeliveryLocation {
+  location_id: number;
+  location_name: string;
+  address: string | null;
+  status: "PENDING_APPROVAL" | "ACTIVE" | "INACTIVE";
+}
+
+export function useCustomerDeliveryLocations(customerId: number | undefined) {
+  return useQuery({
+    queryKey: ["customer-delivery-locations", customerId],
+    enabled: customerId !== undefined,
+    queryFn: async (): Promise<DeliveryLocation[]> => {
+      const { data, error } = await supabase
+        .from("delivery_location")
+        .select("location_id, location_name, address, status")
+        .eq("customer_id", customerId!)
+        .eq("status", "ACTIVE")
+        .order("location_name");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### src/hooks/useCustomerOrderableItems.ts
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface OrderableItem {
+  mapping_id: number;
+  product_id: number;
+  display_name: string | null;
+  product_master: { product_name: string } | null;
+  uom_master: { uom_name: string } | null;
+  price: number | null;
+}
+
+// Deliberately two separate queries, not a nested embed — customer_price_master
+// can have multiple historical rows per mapping (only one active at a time,
+// via effective_to IS NULL), so filtering that correctly inside a PostgREST
+// embed is unreliable. Two flat queries, merged client-side, is safer.
+export function useCustomerOrderableItems(customerId: number | undefined) {
+  return useQuery({
+    queryKey: ["customer-orderable-items", customerId],
+    enabled: customerId !== undefined,
+    queryFn: async (): Promise<OrderableItem[]> => {
+      const { data: mappings, error: mappingsError } = await supabase
+        .from("customer_product_mapping")
+        .select("mapping_id, product_id, display_name, product_master(product_name), uom_master(uom_name)")
+        .eq("customer_id", customerId!)
+        .eq("is_active", true);
+      if (mappingsError) throw new Error(mappingsError.message);
+
+      const { data: prices, error: pricesError } = await supabase
+        .from("customer_price_master")
+        .select("mapping_id, price")
+        .eq("customer_id", customerId!)
+        .is("effective_to", null);
+      if (pricesError) throw new Error(pricesError.message);
+
+      const priceByMapping = new Map(prices.map((p) => [p.mapping_id, p.price]));
+
+      return (mappings as any[]).map((m) => ({
+        mapping_id: m.mapping_id,
+        product_id: m.product_id,
+        display_name: m.display_name,
+        product_master: m.product_master,
+        uom_master: m.uom_master,
+        price: priceByMapping.get(m.mapping_id) ?? null,
+      }));
+    },
+  });
+}
+```
+
+---
+
+## PART 2 — A reusable ordering component, separate from the page itself
+
+Create src/components/orders/StaffOrderForm.tsx. This takes `customerId: number`
+as a prop and contains ALL the actual ordering UI: delivery location select
+(from `useCustomerDeliveryLocations`), one row per item from
+`useCustomerOrderableItems` (showing the resolved label — `display_name ??
+product_master.product_name` — plus unit name and price), a quantity input
+per row (no unit picker — each mapping_id already has exactly one unit built
+in, unlike the old per-product multi-unit design), a cart summary, and the
+submit action.
+
+This component should NOT know or care that it's being used by staff — it
+just takes a customerId and does the ordering. This is the piece that
+survives unchanged when real customer login exists later; only what wraps it
+changes.
+
+Submit action:
+```ts
+const { data, error } = await supabase.rpc("place_order", {
+  p_location_id: selectedLocationId,
+  p_order_lines: cartItems.map((item) => ({
+    mapping_id: item.mapping_id,
+    quantity: item.qty,
+  })),
+  p_customer_id: customerId,
+});
+```
+`p_order_lines` is passed as a plain JS array — do not `JSON.stringify()` it,
+supabase-js serializes it to JSONB automatically.
+
+On success, show the real confirmation using what `place_order` actually
+returned (`data[0].order_id`, `data[0].order_type`, `data[0].order_date`) —
+not a random fake reference number. Replace "You can modify this order until
+08:00 PM today" with "This order was placed on behalf of the customer." —
+customers can modify their own orders themselves later (that's a separate,
+already-built RPC), but staff placing on their behalf doesn't carry that same
+promise.
+
+On error, show the real Postgres error message (e.g. if a product has no
+price set, or the customer has no active locations) — don't swallow it.
+
+---
+
+## PART 3 — portal-place-order.tsx becomes the staff wrapper
+
+Replace the entire file. Remove `PORTAL_CUSTOMER_ID`, all mock imports
+(`deliveryLocations, products, customerProductMapping, customerPricing`), and
+the hardcoded `UNITS_BY_PRODUCT` map entirely.
+
+New structure: a Customer select at the top (populated from `useCustomers()`,
+already built), and once a customer is selected, render
+`<StaffOrderForm customerId={selectedCustomerId} />` below it. Before a
+customer is selected, show a simple placeholder message instead of the
+ordering UI ("Select a customer to place an order on their behalf.").
+
+Update the page title/description to reflect what this actually is right
+now: "Place Order" → "Place Order for Customer", description something like
+"Place an order on behalf of a customer. This will be replaced by customer
+self-service ordering once phone login is live."
+
+## Deliverable
+
+A working staff tool: pick a customer, see their real assigned items at
+their real prices, enter quantities, submit, get a real order confirmation
+with a real order_id. The actual ordering logic lives in StaffOrderForm.tsx,
+built to take a customerId with no assumption about where that ID comes
+from — that's what makes the future swap to real customer self-service a
+contained edit later, not a rewrite.

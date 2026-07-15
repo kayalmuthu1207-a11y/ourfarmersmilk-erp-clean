@@ -1,0 +1,188 @@
+# Replit Agent Prompt — Customer Ops Batch (Profile, Portal Users, Delivery Locations)
+
+Paste everything below into Replit Agent as one prompt. Do these three pages in this
+prompt only. Do NOT touch customers-activity.tsx, customers-credit.tsx, or
+customers-documents.tsx — those have no backing tables in the schema and are
+intentionally left as mock for now (confirmed against the live database, not an oversight).
+
+---
+
+## Before writing any code
+
+Run a quick check on the `delivery_location` table's full column list (e.g. `select *
+from delivery_location limit 1` in the SQL editor, or equivalent) — I only have
+confirmed columns `location_id, customer_id, location_name, address, status`. If there
+are more columns (pincode, landmark, contact person, delivery sequence, etc.), include
+them in the hook and the add/edit form. If there's a dedicated RPC for creating or
+approving a delivery location (search `pg_proc` for `%location%`), use that instead of
+a direct table insert/update. If no such RPC exists, use a direct
+`supabase.from("delivery_location")` insert/update and flag in your summary if RLS
+blocks it — don't work around RLS, report it.
+
+Also do a quick existence check for an `update_customer` -style RPC (search `pg_proc`
+for `%customer%` again in case one was added after this schema pull) before assuming a
+direct table update is required for the profile edit in Step 1.
+
+---
+
+## Step 1 — Create `src/hooks/useCustomerProfile.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface CustomerProfile {
+  customer_id: number;
+  customer_name: string;
+  category: string | null;
+  billing_mode: "CYCLE" | "PAY_ON_DELIVERY" | "DAILY";
+  billing_cycle_days: number | null;
+  order_cutoff_time: string | null;
+  status: "PENDING_APPROVAL" | "ACTIVE" | "INACTIVE";
+  primary_contact_name: string | null;
+  primary_contact_phone: string | null;
+  secondary_contact_name: string | null;
+  secondary_contact_phone: string | null;
+  is_staff_managed: boolean;
+  approved_by: number | null;
+  approved_at: string | null;
+  last_cycle_end_date: string | null;
+}
+
+export function useCustomerProfile(customerId: number | undefined) {
+  return useQuery({
+    queryKey: ["customer-profile", customerId],
+    enabled: customerId !== undefined,
+    queryFn: async (): Promise<CustomerProfile> => {
+      const { data, error } = await supabase
+        .from("customer_master")
+        .select("*")
+        .eq("customer_id", customerId!)
+        .single();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+## Step 2 — Replace `src/pages/customers-profile.tsx`
+
+Build a page that:
+- Uses `useCustomers()` (already exists) to populate a customer-select dropdown at the top
+- Uses `useCustomerProfile(selectedCustomerId)` to load the full profile once a customer is selected
+- Renders an editable form: customer name, category, primary/secondary contact name+phone,
+  billing mode, billing cycle days, order cutoff time
+- A "Save Changes" button that runs a `useMutation` doing
+  `supabase.from("customer_master").update({...}).eq("customer_id", customerId)`
+  (or the RPC found in the pre-check above, if one exists) — on success,
+  `queryClient.invalidateQueries({ queryKey: ["customer-profile", customerId] })` and
+  `queryClient.invalidateQueries({ queryKey: ["customers"] })`, plus a toast
+- If `status === "PENDING_APPROVAL"`, show an "Approve Customer" button calling
+  `supabase.rpc("approve_customer", { p_customer_id: customerId })`, invalidating the
+  same queries on success
+- Read-only display (not editable) for `approved_by`, `approved_at`, `last_cycle_end_date`,
+  `is_staff_managed` — these are system-set fields
+- Loading/error states matching the existing pattern (Loader2 spinner, AlertTriangle error card,
+  same as `customer-statements.tsx`)
+
+## Step 3 — Create `src/hooks/useCustomerUsers.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface CustomerUser {
+  customer_user_id: number;
+  customer_id: number;
+  phone_number: string;
+  full_name: string | null;
+  role: string | null;
+  status: string;
+  last_login_at: string | null;
+  customer_master: { customer_name: string } | null;
+}
+
+export function useCustomerUsers() {
+  return useQuery({
+    queryKey: ["customer-users"],
+    queryFn: async (): Promise<CustomerUser[]> => {
+      const { data, error } = await supabase
+        .from("customer_user")
+        .select(
+          "customer_user_id, customer_id, phone_number, full_name, role, status, last_login_at, customer_master(customer_name)",
+        )
+        .order("customer_user_id", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as unknown as CustomerUser[];
+    },
+  });
+}
+```
+
+## Step 4 — Replace `src/pages/customers-users.tsx`
+
+Build a page that:
+- Shows a table of all `customer_user` rows via `useCustomerUsers()`: customer name,
+  phone number, full name, role, status badge, last login
+- Has an "Add Portal User" button opening a Dialog with: customer-select (via
+  `useCustomers()`), phone number input, full name input
+- On submit, calls `supabase.rpc("create_customer_user", { p_customer_id, p_phone_number,
+  p_full_name })`, invalidates `["customer-users"]` on success, shows a toast
+- Note in the UI (small muted text) that these accounts can't actually log in yet since
+  phone-OTP auth isn't live — this page manages the records ahead of that going live
+- Loading/error states matching the existing pattern
+
+## Step 5 — Create `src/hooks/useAllDeliveryLocations.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DeliveryLocationRow {
+  location_id: number;
+  customer_id: number;
+  location_name: string;
+  address: string | null;
+  status: "PENDING_APPROVAL" | "ACTIVE" | "INACTIVE";
+  customer_master: { customer_name: string } | null;
+}
+
+export function useAllDeliveryLocations() {
+  return useQuery({
+    queryKey: ["all-delivery-locations"],
+    queryFn: async (): Promise<DeliveryLocationRow[]> => {
+      const { data, error } = await supabase
+        .from("delivery_location")
+        .select(
+          "location_id, customer_id, location_name, address, status, customer_master(customer_name)",
+        )
+        .order("location_id", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as unknown as DeliveryLocationRow[];
+    },
+  });
+}
+```
+
+Add any extra columns discovered in the pre-check to both this hook and the interface.
+
+## Step 6 — Replace `src/pages/customers-delivery-locations.tsx`
+
+Build a page that:
+- Shows a table of all locations via `useAllDeliveryLocations()`: customer name, location
+  name, address, status badge
+- For rows with `status === "PENDING_APPROVAL"`, show an "Approve" button and a
+  "Reject" button. Use the RPC found in the pre-check if one exists; otherwise a direct
+  `supabase.from("delivery_location").update({ status: "ACTIVE" | "INACTIVE" }).eq("location_id", ...)`
+- Invalidate `["all-delivery-locations"]` after any mutation, with a toast
+- Loading/error states matching the existing pattern
+
+---
+
+## Before marking any of this complete
+
+Run `pnpm run typecheck` (or the equivalent for this workspace) and paste the actual
+output. Then run `grep -rn "customers-activity\|customers-credit\|customers-documents"
+src/pages/` to confirm those three files were NOT modified. Report both results — don't
+summarize from memory.

@@ -1,0 +1,232 @@
+# Replit Agent Prompt — Orders Batch + Shortage Adjustments
+
+Paste everything below into Replit Agent as one prompt. Do NOT touch
+orders-recurring.tsx or billing-credit-notes.tsx — both confirmed against the live
+schema to have no backing table/concept. Leave them as mock.
+
+---
+
+## Step 1 — Create `src/hooks/useOrderHistory.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface OrderHistoryLine {
+  order_line_id: number;
+  product_id: number;
+  ordered_qty: number;
+  unit_price: number;
+  line_amount: number;
+  vap_confirmation_status: "PENDING_CONFIRMATION" | "CONFIRMED" | "NOT_AVAILABLE" | null;
+  product_master: { product_name: string } | null;
+}
+
+export interface OrderHistoryRow {
+  order_id: number;
+  order_type: "REGULAR" | "VAP";
+  order_date: string;
+  order_status: string;
+  is_same_day: boolean;
+  created_at: string;
+  customer_master: { customer_name: string } | null;
+  delivery_location: { location_name: string } | null;
+  customer_order_line: OrderHistoryLine[];
+}
+
+export function useOrderHistory() {
+  return useQuery({
+    queryKey: ["order-history"],
+    queryFn: async (): Promise<OrderHistoryRow[]> => {
+      const { data, error } = await supabase
+        .from("customer_order")
+        .select(
+          "order_id, order_type, order_date, order_status, is_same_day, created_at, customer_master(customer_name), delivery_location(location_name), customer_order_line(order_line_id, product_id, ordered_qty, unit_price, line_amount, vap_confirmation_status, product_master(product_name))",
+        )
+        .order("order_date", { ascending: false })
+        .order("order_id", { ascending: false })
+        .limit(300);
+      if (error) throw new Error(error.message);
+      return data as unknown as OrderHistoryRow[];
+    },
+  });
+}
+```
+
+## Step 2 — Replace `src/pages/orders-history.tsx`
+
+Build a page using `useOrderHistory()`: a table with Order ID, Date, Customer, Location,
+Type badge, Status badge (render whatever string comes back — don't hardcode a fixed
+enum list since not every `order_status` value has been confirmed), item count, total
+value (sum of `line_amount` across lines). Clicking a row expands/opens a dialog showing
+line-item detail (product, qty, unit price, line amount, VAP status). Add search by
+customer name and a status filter dropdown built from distinct statuses present in the
+loaded data (not hardcoded).
+
+## Step 3 — Replace `src/pages/orders-same-day.tsx`
+
+Build this as a **read-only browsing page only** — no "create new same-day order" button.
+Reuse `useOrderHistory()` and filter client-side to `is_same_day === true`. Same table
+shape as Step 2. Add a small note near the top: "Same-day order creation isn't wired yet
+— it requires a real customer-authenticated session (`record_same_day_order` has no
+staff-on-behalf-of parameter). This page currently shows same-day orders already in the
+system."
+
+## Step 4 — Create `src/hooks/useOrderChangeHistory.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface OrderChangeLogEntry {
+  change_log_id: number;
+  order_id: number;
+  change_description: string;
+  changed_at: string;
+  customer_order: {
+    customer_master: { customer_name: string } | null;
+  } | null;
+}
+
+export function useOrderChangeHistory() {
+  return useQuery({
+    queryKey: ["order-change-history"],
+    queryFn: async (): Promise<OrderChangeLogEntry[]> => {
+      const { data, error } = await supabase
+        .from("order_change_log")
+        .select(
+          "change_log_id, order_id, change_description, changed_at, customer_order(customer_master(customer_name))",
+        )
+        .order("changed_at", { ascending: false })
+        .limit(300);
+      if (error) throw new Error(error.message);
+      return data as unknown as OrderChangeLogEntry[];
+    },
+  });
+}
+```
+
+## Step 5 — Replace `src/pages/orders-change-history.tsx`
+
+Build a page using `useOrderChangeHistory()`: a simple timeline/table — Changed At,
+Order ID, Customer, Change Description. Add a search input filtering by customer name
+or order ID.
+
+## Step 6 — Create `src/hooks/useVapQueue.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface VapQueueLine {
+  order_line_id: number;
+  order_id: number;
+  product_id: number;
+  ordered_qty: number;
+  vap_confirmation_status: "PENDING_CONFIRMATION" | "CONFIRMED" | "NOT_AVAILABLE";
+  product_master: { product_name: string } | null;
+  customer_order: {
+    order_date: string;
+    customer_master: { customer_name: string } | null;
+    delivery_location: { location_name: string } | null;
+  } | null;
+}
+
+export function useVapQueue() {
+  return useQuery({
+    queryKey: ["vap-queue"],
+    queryFn: async (): Promise<VapQueueLine[]> => {
+      const { data, error } = await supabase
+        .from("customer_order_line")
+        .select(
+          "order_line_id, order_id, product_id, ordered_qty, vap_confirmation_status, product_master(product_name), customer_order(order_date, customer_master(customer_name), delivery_location(location_name))",
+        )
+        .eq("vap_confirmation_status", "PENDING_CONFIRMATION")
+        .order("order_id", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as unknown as VapQueueLine[];
+    },
+  });
+}
+```
+
+## Step 7 — Replace `src/pages/orders-vap-queue.tsx`
+
+Build a page using `useVapQueue()`: a table of pending-confirmation lines — Order ID,
+Order Date, Customer, Location, Product, Ordered Qty. Each row has "Confirm Available"
+and "Not Available" buttons calling
+`supabase.rpc("confirm_vap_line", { p_order_line_id, p_confirmed: true/false })`.
+On success, invalidate `["vap-queue"]` (and `["dispatchable-orders"]` too, since
+dispatch planning reads `vap_confirmation_status` off the same rows), toast, and remove
+the row from view. Loading/error states matching existing pages.
+
+## Step 8 — Replace `src/pages/portal-vap-orders.tsx`
+
+Same data and mutation as Step 7, but scoped like `portal-place-order.tsx`: show a
+customer-select dropdown (via the existing `useCustomers()` hook) at the top, and filter
+`useVapQueue()` results client-side to `customer_order.customer_master` matching the
+selected customer (match by `customer_order.customer_id` — add `customer_id` to the
+`customer_order` embed in a local copy of the query if the current shape doesn't expose
+it directly). Add the same note as `portal-place-order.tsx` about this being a
+staff-usable stand-in until customer phone-OTP login is live.
+
+## Step 9 — Create `src/hooks/useDeliveryAdjustments.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DeliveryAdjustment {
+  delivery_adjustment_id: number;
+  dispatch_line_id: number;
+  statement_line_id: number | null;
+  adjustment_type: string;
+  ordered_qty: number;
+  delivered_qty: number;
+  adjustment_qty: number;
+  amount_impact: number;
+  remarks: string | null;
+  approval_status: string;
+  entered_by: number | null;
+  entered_by_customer_user_id: number | null;
+  created_at: string;
+}
+
+export function useDeliveryAdjustments() {
+  return useQuery({
+    queryKey: ["delivery-adjustments"],
+    queryFn: async (): Promise<DeliveryAdjustment[]> => {
+      const { data, error } = await supabase
+        .from("delivery_adjustment")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(300);
+      if (error) throw new Error(error.message);
+      return data as unknown as DeliveryAdjustment[];
+    },
+  });
+}
+```
+
+Before Step 10: search `pg_proc` for `%delivery_adjustment%` or `%shortage%` to check
+for an approve/reject RPC. If one exists, use it for the approve/reject buttons below
+instead of a direct table update.
+
+## Step 10 — Replace `src/pages/billing-shortage-adjustments.tsx`
+
+Build a page using `useDeliveryAdjustments()`: a table with Dispatch Line ID, Type,
+Ordered Qty, Delivered Qty, Adjustment Qty, Amount Impact, Remarks, Approval Status
+badge (render whatever string comes back, don't hardcode specific values). For rows
+where `approval_status` looks like a pending state, show Approve/Reject buttons using
+the RPC found above, or a direct `supabase.from("delivery_adjustment").update(...)` if
+no RPC exists — flag in your summary which one you used. Note: there's no direct
+customer-name join available here (it links via `dispatch_line_id`, not `customer_id`),
+so just show the raw IDs for now rather than guessing a join path.
+
+---
+
+## Before marking this complete
+
+Run the project's typecheck command and paste the actual output. Then run
+`grep -rn "orders-recurring\|billing-credit-notes" src/pages/` to confirm those two
+files were not touched. Report both results directly — don't summarize from memory.

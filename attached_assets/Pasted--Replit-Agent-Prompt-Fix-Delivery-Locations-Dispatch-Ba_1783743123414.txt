@@ -1,0 +1,271 @@
+# Replit Agent Prompt — Fix Delivery Locations + Dispatch Batch
+
+Paste everything below into Replit Agent as one prompt.
+
+Do NOT touch dispatch-vehicles.tsx, dispatch-partners.tsx, dispatch-tracking.tsx,
+delivery-partner.tsx, or delivery-profile.tsx — confirmed against the live schema that
+none of the entities they need (vehicles, delivery partners/drivers, driver-route
+assignment, live location tracking) exist yet. Leave them as mock.
+
+---
+
+## Part A — Fix `customers-delivery-locations.tsx` (built earlier with incomplete schema)
+
+### A1. Replace `src/hooks/useAllDeliveryLocations.ts` entirely with:
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DeliveryLocationRow {
+  location_id: number;
+  customer_id: number;
+  location_name: string;
+  fulfillment_type: string | null;
+  route_id: number | null;
+  is_default_location: boolean;
+  status: "PENDING_APPROVAL" | "ACTIVE" | "INACTIVE";
+  address: string | null;
+  contact_person: string | null;
+  phone_number: string | null;
+  approved_by: number | null;
+  approved_at: string | null;
+  created_at: string;
+  customer_master: { customer_name: string } | null;
+  delivery_route: { route_name: string } | null;
+}
+
+export function useAllDeliveryLocations() {
+  return useQuery({
+    queryKey: ["all-delivery-locations"],
+    queryFn: async (): Promise<DeliveryLocationRow[]> => {
+      const { data, error } = await supabase
+        .from("delivery_location")
+        .select(
+          "location_id, customer_id, location_name, fulfillment_type, route_id, is_default_location, status, address, contact_person, phone_number, approved_by, approved_at, created_at, customer_master(customer_name), delivery_route(route_name)",
+        )
+        .order("location_id", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data as unknown as DeliveryLocationRow[];
+    },
+  });
+}
+```
+
+### A2. Create `src/hooks/useDeliveryRoutes.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DeliveryRoute {
+  route_id: number;
+  route_name: string;
+}
+
+export function useDeliveryRoutes() {
+  return useQuery({
+    queryKey: ["delivery-routes"],
+    queryFn: async (): Promise<DeliveryRoute[]> => {
+      const { data, error } = await supabase
+        .from("delivery_route")
+        .select("route_id, route_name")
+        .order("route_name");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+}
+```
+
+### A3. Update `src/pages/customers-delivery-locations.tsx`
+
+Keep the existing table (customer, location, address, status), but:
+- Add remaining columns as extra table cells or an expandable row detail: fulfillment
+  type, route name, contact person, phone, is-default badge
+- Add an "Add Location" button opening a Dialog with fields: customer-select (via
+  `useCustomers()`), location name, address, contact person, phone number,
+  fulfillment-type select, is-default checkbox, route-select (via the new
+  `useDeliveryRoutes()`). On submit call:
+  `supabase.rpc("create_delivery_location", { p_customer_id, p_location_name, p_address, p_contact_person, p_phone_number, p_fulfillment_type, p_is_default_location, p_route_id })`
+- For `status === "PENDING_APPROVAL"` rows, the Approve button must call
+  `supabase.rpc("approve_delivery_location", { p_location_id: location.location_id })`
+  — replace any direct-table-update version if one was built earlier
+- Invalidate `["all-delivery-locations"]` after both mutations, with a toast
+
+---
+
+## Part B — Reuse existing `useDeliveryAdjustments` for `dispatch-adjustments.tsx`
+
+`useDeliveryAdjustments` and its data shape already exist from earlier work — do not
+recreate the hook, import it as-is.
+
+### B1. Create `src/hooks/useRecentDispatchLinesForAdjustment.ts`
+
+(A lightweight lookup list to pick which dispatch line an adjustment is being logged
+against — separate from the existing `useRecentDispatchLines` if that hook has a
+different shape; check first and reuse it directly if its shape already fits this need.)
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DispatchLineOption {
+  dispatch_line_id: number;
+  dispatch_id: number;
+  product_id: number;
+  ordered_base_qty: number;
+  dispatched_base_qty: number;
+  product_master: { product_name: string } | null;
+  dispatch_record: {
+    dispatch_date: string;
+    customer_order: { customer_master: { customer_name: string } | null } | null;
+  } | null;
+}
+
+export function useRecentDispatchLinesForAdjustment() {
+  return useQuery({
+    queryKey: ["recent-dispatch-lines-for-adjustment"],
+    queryFn: async (): Promise<DispatchLineOption[]> => {
+      const { data, error } = await supabase
+        .from("dispatch_line")
+        .select(
+          "dispatch_line_id, dispatch_id, product_id, ordered_base_qty, dispatched_base_qty, product_master(product_name), dispatch_record(dispatch_date, customer_order(customer_master(customer_name)))",
+        )
+        .order("dispatch_line_id", { ascending: false })
+        .limit(100);
+      if (error) throw new Error(error.message);
+      return data as unknown as DispatchLineOption[];
+    },
+  });
+}
+```
+
+### B2. Replace `src/pages/dispatch-adjustments.tsx`
+
+Build a page with two sections:
+1. **Log New Adjustment** — a form: dispatch-line search/select (via
+   `useRecentDispatchLinesForAdjustment()`, showing customer + product + date per
+   option), adjustment-type select, delivered-qty input, remarks textarea. On submit,
+   call `supabase.rpc("log_delivery_adjustment", { p_dispatch_line_id, p_adjustment_type, p_delivered_qty, p_remarks })`.
+   Invalidate `["delivery-adjustments"]` on success, toast.
+2. **Recent Adjustments** — reuse `useDeliveryAdjustments()` exactly as built for
+   `billing-shortage-adjustments.tsx`, same table shape, read-only here (no
+   approve/reject buttons on this page — that stays on the billing page).
+
+---
+
+## Part C — `dispatch-route-planning.tsx` (scoped to what actually exists)
+
+### C1. Update `src/hooks/useDeliveryRoutes.ts` (from Part A2) to also return location counts:
+
+Replace the hook body with:
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DeliveryRoute {
+  route_id: number;
+  route_name: string;
+  location_count: number;
+}
+
+export function useDeliveryRoutes() {
+  return useQuery({
+    queryKey: ["delivery-routes"],
+    queryFn: async (): Promise<DeliveryRoute[]> => {
+      const { data: routes, error: routesError } = await supabase
+        .from("delivery_route")
+        .select("route_id, route_name")
+        .order("route_name");
+      if (routesError) throw new Error(routesError.message);
+
+      const { data: locations, error: locError } = await supabase
+        .from("delivery_location")
+        .select("route_id")
+        .not("route_id", "is", null);
+      if (locError) throw new Error(locError.message);
+
+      return routes.map((r) => ({
+        ...r,
+        location_count: locations.filter((l) => l.route_id === r.route_id).length,
+      }));
+    },
+  });
+}
+```
+
+(This changes the shape used in Part A3's route-select dropdown too — just use
+`route.route_name` there, ignore `location_count` in that context.)
+
+### C2. Replace `src/pages/dispatch-route-planning.tsx`
+
+Build a simple page: a table of routes via `useDeliveryRoutes()` — Route Name, Locations
+Assigned (count). Add a note: "Detailed stop sequencing and drive-time planning aren't
+in the schema yet — this is a route roster view for now." No stats cards claiming
+distance/coverage (that data doesn't exist).
+
+---
+
+## Part D — `delivery-reports.tsx` (scoped to actual dispatch history, not per-partner)
+
+### D1. Create `src/hooks/useDispatchReports.ts`
+
+```typescript
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface DispatchReportLine {
+  dispatch_line_id: number;
+  product_id: number;
+  ordered_base_qty: number;
+  dispatched_base_qty: number;
+  product_master: { product_name: string } | null;
+}
+
+export interface DispatchReportRow {
+  dispatch_id: number;
+  order_id: number;
+  dispatch_date: string;
+  customer_order: { customer_master: { customer_name: string } | null } | null;
+  dispatch_line: DispatchReportLine[];
+}
+
+export function useDispatchReports() {
+  return useQuery({
+    queryKey: ["dispatch-reports"],
+    queryFn: async (): Promise<DispatchReportRow[]> => {
+      const { data, error } = await supabase
+        .from("dispatch_record")
+        .select(
+          "dispatch_id, order_id, dispatch_date, customer_order(customer_master(customer_name)), dispatch_line(dispatch_line_id, product_id, ordered_base_qty, dispatched_base_qty, product_master(product_name))",
+        )
+        .order("dispatch_date", { ascending: false })
+        .order("dispatch_id", { ascending: false })
+        .limit(200);
+      if (error) throw new Error(error.message);
+      return data as unknown as DispatchReportRow[];
+    },
+  });
+}
+```
+
+### D2. Replace `src/pages/delivery-reports.tsx`
+
+Build a page using `useDispatchReports()`: a table — Dispatch Date, Order ID, Customer,
+item count, and a shortfall indicator (highlight the row if any line has
+`dispatched_base_qty < ordered_base_qty`). Expandable row shows line-item detail
+(product, ordered qty, dispatched qty, shortfall if any). Add a date-range filter and
+customer-name search. Remove any "per delivery partner" framing from the mock — this is
+an operational dispatch report, not a partner-performance report (no partner data
+exists yet).
+
+---
+
+## Before marking this complete
+
+Run the project's typecheck command and paste the actual output. Then run
+`grep -rn "dispatch-vehicles\|dispatch-partners\|dispatch-tracking\|delivery-partner.tsx\|delivery-profile" src/pages/`
+to confirm those five files were not touched. Report both results directly — don't
+summarize from memory.
