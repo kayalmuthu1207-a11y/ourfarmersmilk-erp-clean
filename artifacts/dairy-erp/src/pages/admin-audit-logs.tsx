@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Loader2, AlertCircle } from "lucide-react";
+import { Search, Loader2, AlertCircle, Info } from "lucide-react";
 import { useAuditLogs } from "@/hooks/useAuditLogs";
 
 export default function AuditLogs() {
@@ -34,7 +34,16 @@ export default function AuditLogs() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
-        <p className="text-muted-foreground text-sm mt-1">Full audit trail of all data changes across the ERP</p>
+        <p className="text-muted-foreground text-sm mt-1">Audit trail table for data changes across the ERP</p>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5">
+        <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-blue-900">
+          The <code>audit_log</code> table and this page are real and wired correctly, but no trigger or RPC writes
+          to it yet — no action anywhere in the app currently logs here. This is empty because the feature isn't
+          finished, not because there's been no activity.
+        </p>
       </div>
 
       <Card>
@@ -89,7 +98,7 @@ export default function AuditLogs() {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-10">No audit log entries found</TableCell>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground py-10">No audit log entries yet — logging isn't wired to any workflow yet</TableCell>
                   </TableRow>
                 ) : filtered.map((l) => (
                   <TableRow key={l.audit_id}>

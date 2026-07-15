@@ -121,7 +121,7 @@ const allNavGroups = [
   {
     label: "Orders",
     items: [
-      { title: "Order Entry", url: "/portal/place-order", icon: ShoppingCart },
+      { title: "Order Entry", url: "/orders/entry", icon: ShoppingCart },
       { title: "VAP Queue", url: "/orders/vap-queue", icon: Activity },
       { title: "Same-Day Orders", url: "/orders/same-day", icon: ShoppingCart },
       { title: "Order History", url: "/orders/history", icon: FileText },
