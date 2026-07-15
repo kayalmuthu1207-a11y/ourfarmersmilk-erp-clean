@@ -1,124 +1,102 @@
-import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { RefreshCw, CheckSquare, XCircle } from "lucide-react";
-
-const failures = [
-  { id: "f1", num: "FAIL-0088", date: "2026-07-03 08:45", type: "Sales Invoice", ref: "INV-2220", amount: 18500, error: "Connection timeout after 30s", retries: 3, lastRetry: "2026-07-03 09:30", status: "Failed" },
-  { id: "f2", num: "FAIL-0087", date: "2026-07-03 07:20", type: "Purchase Voucher", ref: "PV-2026-07-03-001", amount: 45200, error: "Ledger 'Mullipakam Village' not found in Tally", retries: 1, lastRetry: "2026-07-03 07:25", status: "Failed" },
-  { id: "f3", num: "FAIL-0086", date: "2026-07-02 18:10", type: "Receipt Voucher", ref: "RV-2026-07-02-003", amount: 25000, error: "Duplicate voucher reference", retries: 2, lastRetry: "2026-07-02 18:30", status: "Retrying" },
-  { id: "f4", num: "FAIL-0085", date: "2026-07-02 10:35", type: "Stock Entry", ref: "BATCH-02-003", amount: 0, error: "Invalid stock item: 'Toned Milk 500 ml'", retries: 4, lastRetry: "2026-07-02 12:00", status: "Resolved" },
-  { id: "f5", num: "FAIL-0084", date: "2026-07-01 20:15", type: "Sales Invoice", ref: "INV-2215", amount: 12800, error: "Connection timeout after 30s", retries: 3, lastRetry: "2026-07-01 21:00", status: "Resolved" },
-  { id: "f6", num: "FAIL-0083", date: "2026-07-01 15:40", type: "Sales Order", ref: "SO-2026-07-01-005", amount: 8400, error: "Amount format error: currency mismatch", retries: 1, lastRetry: "2026-07-01 16:00", status: "Resolved" },
-];
-
-const errorBreakdown = [
-  { name: "Connection Timeout", value: 40, color: "#dc2626" },
-  { name: "Ledger Not Found", value: 30, color: "#d97706" },
-  { name: "Duplicate Voucher", value: 20, color: "#2563eb" },
-  { name: "Other", value: 10, color: "#9ca3af" },
-];
-
-const statusBadge: Record<string, string> = {
-  Failed: "bg-red-100 text-red-800 border-red-200",
-  Retrying: "bg-amber-100 text-amber-800 border-amber-200",
-  Resolved: "bg-green-100 text-green-800 border-green-200",
-};
+import { Loader2, AlertTriangle, XCircle, RefreshCw } from "lucide-react";
+import { useTallyPushLog, describeTallyPush } from "@/hooks/useTallyPushLog";
+import { useRetryFailedPush } from "@/hooks/useTallyPushActions";
 
 export default function TallyFailed() {
-  const stats = { total: 18, resolved: 15, pending: 3 };
+  const { data: rows, isLoading, isError, error } = useTallyPushLog(["FAILED"]);
+  const retryMutation = useRetryFailedPush();
+
+  const list = rows ?? [];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Failed Sync Records</h1>
-          <p className="text-muted-foreground text-sm mt-1">TallyPrime sync failures requiring attention</p>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Failed Pushes</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Entries Tally rejected, with the response returned. For bulk retries, use the Resync page.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Currently Failed</CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center gap-2">
+            <XCircle className="h-5 w-5 text-destructive" />
+            <p className="text-2xl font-bold text-destructive">{list.length}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading failed pushes…</span>
         </div>
-        <Button data-testid="btn-retry-all"><RefreshCw className="h-4 w-4 mr-2" />Retry All Failed</Button>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Failures (Month)</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold">{stats.total}</p></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Resolved</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-green-600">{stats.resolved}</p></CardContent></Card>
-        <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Still Pending</CardTitle></CardHeader><CardContent><p className="text-2xl font-bold text-destructive">{stats.pending}</p></CardContent></Card>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      ) : isError ? (
+        <div className="flex flex-col items-center justify-center gap-2 py-16 text-center px-4">
+          <AlertTriangle className="h-6 w-6 text-destructive" />
+          <p className="text-sm font-semibold text-destructive">Failed to load failed pushes</p>
+          <p className="text-xs text-muted-foreground max-w-sm">{(error as Error)?.message}</p>
+        </div>
+      ) : list.length === 0 ? (
         <Card>
-          <CardHeader><CardTitle className="text-sm">Error Type Breakdown</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie data={errorBreakdown} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={({ name, value }) => `${value}%`} labelLine={false} fontSize={11}>
-                  {errorBreakdown.map((e, i) => <Cell key={i} fill={e.color} />)}
-                </Pie>
-                <Tooltip formatter={(v: number) => `${v}%`} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+          <CardContent className="py-16 text-center text-muted-foreground text-sm">
+            No failed pushes right now.
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Common Fixes</CardTitle></CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            {[
-              { error: "Connection Timeout", fix: "Check Tally server status and port 9000 connectivity. Retry after 5 minutes." },
-              { error: "Ledger Not Found", fix: "Verify ledger name in Tally matches exactly. Contact accountant to create missing ledger." },
-              { error: "Duplicate Voucher", fix: "Check if voucher was already manually entered in Tally. Mark as Resolved if so." },
-              { error: "Amount Format Error", fix: "Verify currency settings in Tally match ERP. Check for trailing spaces in amounts." },
-            ].map((c, i) => (
-              <div key={i} className="border rounded p-2">
-                <p className="font-medium text-xs">{c.error}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{c.fix}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Failure#</TableHead>
-                <TableHead>Date/Time</TableHead>
-                <TableHead>Voucher Type</TableHead>
-                <TableHead>Reference</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Error</TableHead>
-                <TableHead className="text-right">Retries</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {failures.map((f) => (
-                <TableRow key={f.id}>
-                  <TableCell className="font-mono text-sm">{f.num}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{f.date}</TableCell>
-                  <TableCell><Badge variant="outline">{f.type}</Badge></TableCell>
-                  <TableCell className="font-mono text-xs">{f.ref}</TableCell>
-                  <TableCell className="text-right">{f.amount > 0 ? `₹${f.amount.toLocaleString()}` : "—"}</TableCell>
-                  <TableCell className="text-xs text-destructive max-w-[200px]">{f.error}</TableCell>
-                  <TableCell className="text-right">{f.retries}</TableCell>
-                  <TableCell><Badge className={statusBadge[f.status]}>{f.status}</Badge></TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      {f.status !== "Resolved" && <Button size="sm" variant="outline" className="h-7 text-xs" data-testid={`retry-${f.id}`}><RefreshCw className="h-3 w-3 mr-1" />Retry</Button>}
-                      {f.status !== "Resolved" && <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid={`resolve-${f.id}`}><CheckSquare className="h-3 w-3 mr-1" />Resolve</Button>}
+      ) : (
+        <div className="space-y-3">
+          {list.map((row) => {
+            const d = describeTallyPush(row);
+            const isRetrying = retryMutation.isPending && retryMutation.variables === row.push_log_id;
+            return (
+              <Card key={row.push_log_id} className="border-red-200">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant="outline" className="text-xs">{d.label}</Badge>
+                      <span className="text-sm font-medium">{d.party ?? d.detail}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {d.amount != null
+                          ? `₹${d.amount.toLocaleString()}`
+                          : d.quantity
+                          ? `${d.quantity.value.toLocaleString()} ${d.quantity.unit}`
+                          : ""}
+                      </span>
                     </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(row.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="rounded-md bg-red-50 border border-red-100 px-3 py-2">
+                    <p className="text-xs text-destructive whitespace-pre-wrap">
+                      {row.tally_response ?? "No response recorded for this failure."}
+                    </p>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1"
+                      disabled={isRetrying}
+                      onClick={() => retryMutation.mutate(row.push_log_id)}
+                      data-testid={`retry-${row.push_log_id}`}
+                    >
+                      {isRetrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                      Retry
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

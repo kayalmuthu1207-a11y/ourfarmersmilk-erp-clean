@@ -122,7 +122,6 @@ export const mockStats = {
   activeOrders: 127,
   outstanding: 482350,
   outstandingCustomers: 34,
-  tallySync: { pending: 12, failed: 3, success: 42 }
 };
 
 export const collectionTrend = [
